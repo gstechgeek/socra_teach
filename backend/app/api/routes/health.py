@@ -72,6 +72,7 @@ async def _check_lancedb() -> ServiceStatus:
         }
 
     try:
+
         def _open() -> list[str]:
             db = lancedb.connect(str(db_path))
             return db.table_names()  # type: ignore[no-any-return]

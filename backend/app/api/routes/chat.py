@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -34,7 +35,7 @@ async def chat_stream(request: ChatRequest) -> EventSourceResponse:
         a final "done" event signals end of stream.
     """
 
-    async def generate():  # type: ignore[return]
+    async def generate() -> AsyncGenerator[dict[str, str], None]:
         async for token in route_and_stream(request.messages):
             yield {"data": json.dumps({"content": token})}
         yield {"event": "done", "data": "{}"}

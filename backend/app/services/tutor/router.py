@@ -7,13 +7,14 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.core.config import settings
+from app.services.tutor.classifier import classify
 from app.services.tutor.socratic import build_socratic_prompt
 
 # Maps logical tier names to OpenRouter model IDs configured in Settings.
 _CLOUD_MODELS: dict[str, str] = {
-    "dialogue": settings.cloud_model_dialogue,   # anthropic/claude-sonnet-4-5
+    "dialogue": settings.cloud_model_dialogue,  # anthropic/claude-sonnet-4-5
     "reasoning": settings.cloud_model_reasoning,  # deepseek/deepseek-r1
-    "fast": settings.cloud_model_fast,            # anthropic/claude-haiku-4-5
+    "fast": settings.cloud_model_fast,  # anthropic/claude-haiku-4-5
 }
 
 
@@ -22,7 +23,7 @@ async def route_and_stream(
 ) -> AsyncIterator[str]:
     """Decide local vs. cloud tier and stream Socratic-framed tokens.
 
-    Routing heuristic (Phase 1: always local; Phase 2: classifier-based):
+    Routing heuristic (Phase 2: classifier-based):
     - Local  : simple recall, Socratic follow-ups, basic hints, offline
     - dialogue: multi-turn Socratic deepening, misconception diagnosis
     - reasoning: multi-step math proofs, STEM derivations, LaTeX-heavy answers
@@ -47,8 +48,12 @@ async def route_and_stream(
 
 # ── Routing decision ──────────────────────────────────────────────────────────
 
+
 def _route_local(messages: list[dict[str, str]]) -> bool:
     """Return True if the query should be handled by the local model.
+
+    Delegates to the intent classifier. Returns True only when the
+    classifier assigns the "local" tier.
 
     Args:
         messages: Chat history used to estimate query complexity.
@@ -56,13 +61,16 @@ def _route_local(messages: list[dict[str, str]]) -> bool:
     Returns:
         True for local inference, False for cloud.
     """
-    # Phase 1: always local.
-    # Phase 2 TODO: replace with confidence-scoring intent classifier.
-    return True
+    return classify(messages) == "local"
 
 
 def _select_cloud_tier(messages: list[dict[str, str]]) -> str:
     """Select the OpenRouter model tier for this query.
+
+    Delegates to the intent classifier. Falls back to "dialogue" if the
+    classifier returns "local" (defensive — prevents a KeyError in
+    _CLOUD_MODELS if this function is called directly in tests or future
+    refactoring without going through _route_local first).
 
     Args:
         messages: Chat history used to estimate complexity.
@@ -70,15 +78,14 @@ def _select_cloud_tier(messages: list[dict[str, str]]) -> str:
     Returns:
         One of: "dialogue", "reasoning", "fast".
     """
-    # Phase 2 TODO: keyword/classifier-based tier selection.
-    # Examples of signals to detect:
-    #   "reasoning" → multi-step proof, matrix algebra, physics derivation
-    #   "fast"      → yes/no confirmation, short reformatting
-    #   "dialogue"  → everything else (default)
-    return "dialogue"
+    tier = classify(messages)
+    if tier == "local":
+        return "dialogue"
+    return tier
 
 
 # ── Local inference (async wrapper) ──────────────────────────────────────────
+
 
 async def _stream_local_async(
     messages: list[dict[str, str]],
@@ -104,7 +111,8 @@ async def _stream_local_async(
             loop.call_soon_threadsafe(queue.put_nowait, token)
         loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
-    await loop.run_in_executor(None, _produce)
+    # Launch producer in thread pool WITHOUT awaiting — lets consumer start immediately.
+    producer_task = asyncio.ensure_future(loop.run_in_executor(None, _produce))
 
     while True:
         token = await queue.get()
@@ -112,8 +120,11 @@ async def _stream_local_async(
             break
         yield token
 
+    await producer_task  # propagate any thread exception; ensures clean shutdown
+
 
 # ── OpenRouter cloud inference ────────────────────────────────────────────────
+
 
 async def _stream_openrouter(
     messages: list[dict[str, str]],
