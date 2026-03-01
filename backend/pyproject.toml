@@ -1,0 +1,62 @@
+[project]
+name = "socra-teach"
+version = "0.1.0"
+description = "Local-first Socratic AI Tutor — Steam Deck OLED"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "sse-starlette>=2.1.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "lancedb>=0.13.0",
+    "sentence-transformers>=3.3.0",
+    "rank-bm25>=0.2.2",
+    "fsrs>=0.5.0",
+    "supabase>=2.9.0",
+    "aiofiles>=24.1.0",
+    # llama-cpp-python requires Vulkan build flags — install separately:
+    #   CMAKE_ARGS="-DGGML_VULKAN=ON" uv pip install llama-cpp-python
+    # See scripts/setup.sh for the full setup sequence.
+    "llama-cpp-python>=0.3.2",
+    # Document ingestion (Phase 3)
+    "docling>=2.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "anyio[trio]>=4.6.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "types-aiofiles>=24.1.0",
+]
+
+# ── Ruff ─────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── Mypy ─────────────────────────────────────────────────────────────────────
+[tool.mypy]
+strict = true
+python_version = "3.11"
+
+# ── Pytest ───────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 80
