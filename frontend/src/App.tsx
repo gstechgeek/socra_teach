@@ -1,36 +1,111 @@
+import { useState, useCallback } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { DocumentsPage } from "./pages/DocumentsPage";
+import { PdfViewer } from "./components/PdfViewer";
 import { TutorPage } from "./pages/TutorPage";
 
-// App sets up the split-pane shell.
-// Phase 4: PdfViewer will occupy the left panel.
-// The chat interface lives in the right panel from Phase 1 onward.
+type View = "tutor" | "documents";
+
+const NAV_HEIGHT = 40;
+
+// App sets up the top nav and switches between the Tutor split-pane and
+// the Documents management page. The left panel renders the PDF viewer.
 export default function App() {
+  const [view, setView] = useState<View>("tutor");
+  const [activeDocId, setActiveDocId] = useState<string | null>(null);
+
+  const pdfUrl = activeDocId ? `/api/documents/${activeDocId}/file` : null;
+
+  const handleSelectDocument = useCallback((docId: string) => {
+    setActiveDocId(docId);
+    setView("tutor");
+  }, []);
+
   return (
-    <PanelGroup direction="horizontal" style={{ height: "100vh" }}>
-      {/* Left pane — PDF viewer (Phase 4) */}
-      <Panel defaultSize={45} minSize={20} style={{ overflow: "hidden" }}>
-        <div
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      {/* ── Navigation bar ───────────────────────────────────────────────── */}
+      <nav
+        style={{
+          height: NAV_HEIGHT,
+          minHeight: NAV_HEIGHT,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 1rem",
+          background: "#0a0c14",
+          borderBottom: "1px solid #1e2030",
+          gap: "1.5rem",
+        }}
+      >
+        <span
           style={{
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#555",
-            fontSize: "0.875rem",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            color: "#7c84a0",
+            letterSpacing: "0.04em",
+            marginRight: "auto",
           }}
         >
-          PDF viewer — Phase 4
-        </div>
-      </Panel>
+          SOCRATIC AI TUTOR
+        </span>
 
-      <PanelResizeHandle
-        style={{ width: 4, background: "#2a2d3a", cursor: "col-resize" }}
-      />
+        {(["tutor", "documents"] as View[]).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "0.8rem",
+              fontWeight: view === v ? 600 : 400,
+              color: view === v ? "#e8eaf0" : "#7c84a0",
+              padding: "0.25rem 0",
+              borderBottom: view === v ? "2px solid #2563eb" : "2px solid transparent",
+              transition: "color 0.15s, border-color 0.15s",
+            }}
+          >
+            {v === "tutor" ? "Tutor" : "Textbooks"}
+          </button>
+        ))}
+      </nav>
 
-      {/* Right pane — Socratic chat */}
-      <Panel defaultSize={55} minSize={30} style={{ overflow: "hidden" }}>
-        <TutorPage />
-      </Panel>
-    </PanelGroup>
+      {/* ── Content area — both views stay mounted; CSS hides the inactive one ── */}
+
+      {/* Tutor — split-pane layout (wrapped in div to avoid display conflicts with PanelGroup) */}
+      <div
+        style={{
+          flex: 1,
+          display: view === "tutor" ? "flex" : "none",
+          height: `calc(100vh - ${NAV_HEIGHT}px)`,
+        }}
+      >
+        <PanelGroup direction="horizontal" style={{ flex: 1 }}>
+          {/* Left pane — PDF viewer */}
+          <Panel defaultSize={45} minSize={20} style={{ overflow: "hidden" }}>
+            <PdfViewer fileUrl={pdfUrl} />
+          </Panel>
+
+          <PanelResizeHandle
+            style={{ width: 4, background: "#2a2d3a", cursor: "col-resize" }}
+          />
+
+          {/* Right pane — Socratic chat */}
+          <Panel defaultSize={55} minSize={30} style={{ overflow: "hidden" }}>
+            <TutorPage />
+          </Panel>
+        </PanelGroup>
+      </div>
+
+      {/* Textbooks — document management */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          display: view === "documents" ? "flex" : "none",
+        }}
+      >
+        <DocumentsPage onSelectDocument={handleSelectDocument} />
+      </div>
+    </div>
   );
 }

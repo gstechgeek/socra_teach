@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 import httpx
 
 from app.core.config import settings
+from app.services.rag.reranker import rerank
+from app.services.rag.retriever import rebuild_bm25_index, retrieve
 from app.services.tutor.classifier import classify
 from app.services.tutor.socratic import build_socratic_prompt
 
@@ -17,33 +20,80 @@ _CLOUD_MODELS: dict[str, str] = {
     "fast": settings.cloud_model_fast,  # anthropic/claude-haiku-4-5
 }
 
+# Separate connect / read timeouts — long reads for reasoning tier streams.
+_OPENROUTER_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+
+
+@dataclass(frozen=True, slots=True)
+class StreamMeta:
+    """Metadata emitted once at the start of a stream."""
+
+    tier: str  # "local", "dialogue", "reasoning", "fast"
+    model: str  # e.g. "llama-3.2-1b-instruct-q4_k_m" or "anthropic/claude-sonnet-4-5"
+
 
 async def route_and_stream(
     messages: list[dict[str, str]],
-) -> AsyncIterator[str]:
+) -> AsyncIterator[str | StreamMeta]:
     """Decide local vs. cloud tier and stream Socratic-framed tokens.
 
-    Routing heuristic (Phase 2: classifier-based):
+    Routing heuristic (Phase 2: classifier-based, Phase 3: RAG-augmented):
     - Local  : simple recall, Socratic follow-ups, basic hints, offline
     - dialogue: multi-turn Socratic deepening, misconception diagnosis
     - reasoning: multi-step math proofs, STEM derivations, LaTeX-heavy answers
     - fast   : lightweight reformatting, quick confirmations
 
+    RAG context is retrieved and injected into the system prompt when documents
+    have been ingested. If no documents exist, retrieval returns [] and the
+    prompt is unchanged (identical to Phase 2 behaviour).
+
+    Yields a ``StreamMeta`` object first, followed by token strings.
+
     Args:
         messages: OpenAI-format chat history.
 
     Yields:
-        Token strings from whichever model handles the query.
+        A single StreamMeta, then token strings from whichever model handles
+        the query.
     """
+    # ── RAG retrieval ─────────────────────────────────────────────────────────
+    query = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+
+    context: str | None = None
+    if query:
+        candidates = await retrieve(query, top_k=10)
+        if candidates:
+            reranked = await rerank(query, candidates, top_k=3)
+            if reranked:
+                context = "\n\n".join(
+                    f"[Page {c.page} — {c.section}]\n{c.text}" for c in reranked
+                )
+
+    # ── Route and stream ──────────────────────────────────────────────────────
     if _route_local(messages):
-        socratic = build_socratic_prompt(messages, cloud=False)
+        yield StreamMeta(tier="local", model="llama-3.2-1b-instruct-q4_k_m")
+        socratic = build_socratic_prompt(messages, cloud=False, context=context)
         async for token in _stream_local_async(socratic):
             yield token
     else:
         tier = _select_cloud_tier(messages)
-        socratic = build_socratic_prompt(messages, cloud=True)
+        model = _CLOUD_MODELS[tier]
+        yield StreamMeta(tier=tier, model=model)
+        socratic = build_socratic_prompt(messages, cloud=True, context=context)
         async for token in _stream_openrouter(socratic, tier):
             yield token
+
+
+async def _warm_bm25() -> None:
+    """Rebuild the BM25 index from existing LanceDB chunks on server startup.
+
+    Called from the FastAPI lifespan handler. No-op if no documents have
+    been ingested yet (returns immediately with an empty index).
+    """
+    from app.services.rag.store import get_all_chunk_texts
+
+    chunks = await asyncio.to_thread(get_all_chunk_texts)
+    rebuild_bm25_index(chunks)
 
 
 # ── Routing decision ──────────────────────────────────────────────────────────
@@ -152,7 +202,7 @@ async def _stream_openrouter(
         "stream": True,
     }
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=_OPENROUTER_TIMEOUT) as client:
         async with client.stream(
             "POST",
             f"{settings.openrouter_base_url}/chat/completions",

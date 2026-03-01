@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from app.services.tutor.router import route_and_stream
+from app.services.tutor.router import StreamMeta, route_and_stream
 
 router = APIRouter()
 
@@ -27,17 +27,29 @@ async def chat_stream(request: ChatRequest) -> EventSourceResponse:
     cloud tier based on complexity, then applies the Socratic prompt
     engine before streaming tokens back to the client.
 
+    The stream emits three event types:
+    - ``metadata``: tier and model info (emitted once, before tokens).
+    - default (no event field): ``{"content": "...", "seq": N}`` token events.
+    - ``done``: signals end of stream.
+
     Args:
         request: Chat history and optional session identifier.
 
     Returns:
-        SSE stream — each event is {"content": "<token>"};
-        a final "done" event signals end of stream.
+        SSE stream of metadata, token, and done events.
     """
 
     async def generate() -> AsyncGenerator[dict[str, str], None]:
-        async for token in route_and_stream(request.messages):
-            yield {"data": json.dumps({"content": token})}
+        seq = 0
+        async for item in route_and_stream(request.messages):
+            if isinstance(item, StreamMeta):
+                yield {
+                    "event": "metadata",
+                    "data": json.dumps({"tier": item.tier, "model": item.model}),
+                }
+            else:
+                yield {"data": json.dumps({"content": item, "seq": seq})}
+                seq += 1
         yield {"event": "done", "data": "{}"}
 
     return EventSourceResponse(generate())

@@ -84,6 +84,49 @@ npm run lint      # ESLint + Prettier check
 
 ---
 
+## First-Run Setup (Phase 3+ — RAG pipeline)
+
+The RAG pipeline downloads three sets of ML models from HuggingFace on first use.
+**These downloads must complete before ingestion or retrieval will work.**
+Run the following once inside Distrobox before starting the server for the first time
+after Phase 3 code is deployed:
+
+```bash
+# Pre-download Docling layout/OCR models (~1–2 GB)
+uv run python -c "
+from docling.document_converter import DocumentConverter
+DocumentConverter()  # triggers model download
+print('Docling models ready')
+"
+
+# Pre-download nomic-embed-text-v1.5 (~130 MB)
+uv run python -c "
+from app.services.rag.embedder import get_embedder
+get_embedder()
+print('Embedder ready')
+"
+
+# Pre-download cross-encoder ms-marco-MiniLM-L-6-v2 (~85 MB)
+uv run python -c "
+from app.services.rag.reranker import _get_cross_encoder
+_get_cross_encoder()
+print('Cross-encoder ready')
+"
+```
+
+If the server is interrupted mid-download, restart it — downloads resume automatically.
+
+**`pylance` note**: `lancedb` requires the `pylance` package (Rust Lance extension) on some
+platforms and Python versions. It is listed as an explicit dependency in `pyproject.toml`
+so `uv sync` installs it. If you see `ModuleNotFoundError: No module named 'lance'`,
+run `uv sync` to ensure it is installed.
+
+**Stuck documents**: If the server is killed while a document is being ingested, its status
+will be frozen at `queued` or `processing`. Re-upload the same file to create a new record
+and restart ingestion.
+
+---
+
 ## Architecture
 
 | Layer | Technology |
@@ -171,3 +214,5 @@ npm run lint      # ESLint + Prettier check
 | No blocking I/O in async routes | Stalls the entire FastAPI event loop |
 | No `.gguf`, LanceDB data, or `.env` committed | Model files are large; secrets must never enter git history |
 | Use `httpx`, not `requests` | `requests` is synchronous; async FastAPI requires async HTTP |
+| Never use `.to_lance()` in `store.py` | Requires optional `lance` C-extension; use `.to_arrow()` + pyarrow compute instead |
+| Pre-download ML models before first ingest | Docling, nomic-embed, cross-encoder all pull from HuggingFace on first use — see First-Run Setup |

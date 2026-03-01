@@ -646,6 +646,15 @@ wheels = [
 ]
 
 [[package]]
+name = "einops"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2539,6 +2548,24 @@ crypto = [
 ]
 
 [[package]]
+name = "pylance"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lance-namespace" },
+    { name = "numpy" },
+    { name = "pyarrow" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/d2/46da0b890b958d9cceec4485de85d69eceab4f8be0144090b18672a94304/pylance-2.0.1-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:bff6452cdb8c56e84102a52291b7a9b4c08c87248d620afef05793b97de32341", size = 51732078, upload-time = "2026-02-13T18:27:23.674Z" },
+    { url = "https://files.pythonhosted.org/packages/00/32/834d2abcff7b26c2acb8f401aa3c198e5b29dcde070af4eb791806de1a23/pylance-2.0.1-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:804fcfb351a97fd3aad532df1fedafbc0109088e7b0ac3051c3512c3100a4a45", size = 54201004, upload-time = "2026-02-13T18:35:08.91Z" },
+    { url = "https://files.pythonhosted.org/packages/10/97/127eb70f6c2eeac986812a889461b8b6627f05bb93021aa9cb77dd92c2c3/pylance-2.0.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:51d089429b40cd81c89d7993191e758059e580dd7239fd2748bedd2e1021b592", size = 57723179, upload-time = "2026-02-13T18:42:11.695Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/a4/e0928a866d45dd2eced31ba84db44ea80c05055c4ff105fc754262c1159d/pylance-2.0.1-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:7fc5ba370514e6ba3e67f49b51e75687534b37e2eefdb91755d4fb20b3f6fe0b", size = 54227900, upload-time = "2026-02-13T18:35:02.269Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/7b/0eb1f7522c8324c3248862d9de308f1f04cc787b53a6a70cb1687498b2c7/pylance-2.0.1-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:d740d7a7ff9905e358a70d2adae2178ab9d6798cf3ef47729371223463c442e6", size = 57675386, upload-time = "2026-02-13T18:41:27.773Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/2e/fff9905866ba91fad883727d482a10b4973a03aed31cb4c726236f6e5716/pylance-2.0.1-cp39-abi3-win_amd64.whl", hash = "sha256:a67f7a96d40a5012b04205879fe7ae50b6bf856fd79e97868582e449cfedbd1b", size = 61882118, upload-time = "2026-02-13T19:06:19.264Z" },
+]
+
+[[package]]
 name = "pylatexenc"
 version = "2.10"
 source = { registry = "https://pypi.org/simple" }
@@ -3507,6 +3534,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "docling" },
+    { name = "einops" },
     { name = "fastapi" },
     { name = "fsrs" },
     { name = "httpx" },
@@ -3514,6 +3542,7 @@ dependencies = [
     { name = "llama-cpp-python" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pylance" },
     { name = "rank-bm25" },
     { name = "sentence-transformers" },
     { name = "sse-starlette" },
@@ -3535,6 +3564,7 @@ dev = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "docling", specifier = ">=2.5.0" },
+    { name = "einops", specifier = ">=0.8.2" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fsrs", specifier = ">=0.5.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -3542,6 +3572,7 @@ requires-dist = [
     { name = "llama-cpp-python", specifier = ">=0.3.2" },
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "pydantic-settings", specifier = ">=2.5.0" },
+    { name = "pylance", specifier = ">=0.17.0" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "sentence-transformers", specifier = ">=3.3.0" },
     { name = "sse-starlette", specifier = ">=2.1.0" },

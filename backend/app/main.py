@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import chat, documents, health, progress
 from app.core.config import settings
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """FastAPI lifespan handler — runs setup on startup, teardown on shutdown.
+
+    Rebuilds the in-memory BM25 index from any LanceDB chunks that were
+    stored in a previous session. No-op if no documents have been ingested.
+    """
+    from app.services.tutor.router import _warm_bm25
+
+    await _warm_bm25()
+    yield
+
+
 app = FastAPI(
     title="Socratic AI Tutor API",
     version="0.1.0",
     description="Local-first Socratic tutoring backend — Steam Deck OLED",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
 
+    # ── Ingestion ──────────────────────────────────────────────────────────────
+    ingestion_timeout: int = 300  # seconds before PDF parsing is aborted
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     allowed_origins: list[str] = ["http://localhost:5173"]
 

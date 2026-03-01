@@ -34,19 +34,36 @@ RULES:
 def build_socratic_prompt(
     messages: list[dict[str, str]],
     cloud: bool = False,
+    context: str | None = None,
 ) -> list[dict[str, str]]:
     """Prepend the appropriate Socratic system prompt to the message history.
+
+    When context is provided (retrieved textbook passages), it is appended
+    to the system message so the model grounds its Socratic questions in
+    the student's actual course material.
 
     Args:
         messages: Raw user/assistant chat history in OpenAI format.
         cloud: If True, use the richer cloud prompt; else use the compact
                local prompt suited for the 1B model.
+        context: Optional pre-formatted string of retrieved textbook passages
+                 to inject into the system message. None means no RAG context
+                 (e.g. no documents uploaded yet).
 
     Returns:
         Message list with the Socratic system prompt as the first entry.
         Any pre-existing system message is replaced.
     """
     prompt = _SYSTEM_PROMPT_CLOUD if cloud else _SYSTEM_PROMPT_LOCAL
+
+    if context:
+        prompt = (
+            prompt
+            + "\n\nCONTEXT (passages from the student's textbook — "
+            "ground your Socratic questions in these):\n"
+            + context
+        )
+
     system = {"role": "system", "content": prompt}
 
     if messages and messages[0].get("role") == "system":

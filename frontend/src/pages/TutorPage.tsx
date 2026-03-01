@@ -7,7 +7,13 @@ import { useChat } from "../hooks/useChat";
  * prepend selected text as context into the next chat message.
  */
 export function TutorPage() {
-  const { messages, isStreaming, send } = useChat();
+  const { messages, isStreaming, metadata, send } = useChat();
+
+  const tierLabel = metadata
+    ? metadata.tier === "local"
+      ? `Local: ${metadata.model}`
+      : `Cloud: ${metadata.model}`
+    : null;
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -17,9 +23,26 @@ export function TutorPage() {
           borderBottom: "1px solid #1e2030",
           fontSize: "0.85rem",
           color: "#7c84a0",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
         }}
       >
-        Socratic AI Tutor — local inference via llama.cpp (Vulkan)
+        <span>Socratic AI Tutor</span>
+        {tierLabel && (
+          <span
+            style={{
+              padding: "0.15rem 0.5rem",
+              borderRadius: 4,
+              fontSize: "0.7rem",
+              fontWeight: 500,
+              background: metadata?.tier === "local" ? "#1a4d2e" : "#2e1a4d",
+              color: metadata?.tier === "local" ? "#6ee7a0" : "#c4b5fd",
+            }}
+          >
+            {tierLabel}
+          </span>
+        )}
       </header>
 
       <div style={{ flex: 1, overflow: "hidden" }}>
