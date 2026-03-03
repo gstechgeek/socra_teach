@@ -12,9 +12,13 @@ export interface StreamMetadata {
   model: string;
 }
 
+class FatalSSEError extends Error {}
+
+
 interface UseChatReturn {
   messages: Message[];
   isStreaming: boolean;
+  streamError: string | null;
   metadata: StreamMetadata | null;
   send: (text: string) => Promise<void>;
   reset: () => void;
@@ -29,6 +33,7 @@ interface UseChatReturn {
 export function useChat(sessionId?: string): UseChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<StreamMetadata | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -61,6 +66,7 @@ export function useChat(sessionId?: string): UseChatReturn {
       ];
       setMessages(nextMessages);
       setIsStreaming(true);
+      setStreamError(null);
       lastSeqRef.current = -1;
 
       const ctrl = new AbortController();
@@ -84,6 +90,11 @@ export function useChat(sessionId?: string): UseChatReturn {
             if (event.event === "metadata") {
               const meta = JSON.parse(event.data) as StreamMetadata;
               setMetadata(meta);
+              return;
+            }
+            if (event.event === "error") {
+              const { message } = JSON.parse(event.data) as { message: string };
+              setStreamError(message);
               return;
             }
             if (event.event === "done") {
@@ -116,8 +127,11 @@ export function useChat(sessionId?: string): UseChatReturn {
           },
 
           onerror(err) {
-            console.error("SSE error", err);
-            setIsStreaming(false);
+            // Throw to prevent fetchEventSource from auto-retrying.
+            // The finally block below will clean up isStreaming.
+            console.error("SSE connection error", err);
+            setStreamError("Connection lost — response may be incomplete.");
+            throw new FatalSSEError();
           },
         });
       } finally {
@@ -134,5 +148,5 @@ export function useChat(sessionId?: string): UseChatReturn {
     setIsStreaming(false);
   }, []);
 
-  return { messages, isStreaming, metadata, send, reset };
+  return { messages, isStreaming, streamError, metadata, send, reset };
 }

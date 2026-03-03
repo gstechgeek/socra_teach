@@ -7,13 +7,7 @@ import { useChat } from "../hooks/useChat";
  * prepend selected text as context into the next chat message.
  */
 export function TutorPage() {
-  const { messages, isStreaming, metadata, send } = useChat();
-
-  const tierLabel = metadata
-    ? metadata.tier === "local"
-      ? `Local: ${metadata.model}`
-      : `Cloud: ${metadata.model}`
-    : null;
+  const { messages, isStreaming, streamError, metadata, send } = useChat();
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -29,21 +23,35 @@ export function TutorPage() {
         }}
       >
         <span>Socratic AI Tutor</span>
-        {tierLabel && (
+        {metadata && (
           <span
             style={{
               padding: "0.15rem 0.5rem",
               borderRadius: 4,
               fontSize: "0.7rem",
               fontWeight: 500,
-              background: metadata?.tier === "local" ? "#1a4d2e" : "#2e1a4d",
-              color: metadata?.tier === "local" ? "#6ee7a0" : "#c4b5fd",
+              background: "#2e1a4d",
+              color: "#c4b5fd",
             }}
           >
-            {tierLabel}
+            {metadata.model}
           </span>
         )}
       </header>
+
+      {streamError && (
+        <div
+          style={{
+            padding: "0.4rem 1rem",
+            fontSize: "0.78rem",
+            color: "#f59e0b",
+            background: "#3b2f11",
+            borderBottom: "1px solid #1e2030",
+          }}
+        >
+          {streamError}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflow: "hidden" }}>
         <Chat messages={messages} isStreaming={isStreaming} onSend={send} />

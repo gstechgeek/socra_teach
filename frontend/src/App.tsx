@@ -2,9 +2,10 @@ import { useState, useCallback } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { PdfViewer } from "./components/PdfViewer";
+import { ProgressPage } from "./pages/ProgressPage";
 import { TutorPage } from "./pages/TutorPage";
 
-type View = "tutor" | "documents";
+type View = "tutor" | "documents" | "progress";
 
 const NAV_HEIGHT = 40;
 
@@ -48,7 +49,7 @@ export default function App() {
           SOCRATIC AI TUTOR
         </span>
 
-        {(["tutor", "documents"] as View[]).map((v) => (
+        {(["tutor", "documents", "progress"] as View[]).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
@@ -64,7 +65,7 @@ export default function App() {
               transition: "color 0.15s, border-color 0.15s",
             }}
           >
-            {v === "tutor" ? "Tutor" : "Textbooks"}
+            {v === "tutor" ? "Tutor" : v === "documents" ? "Textbooks" : "Progress"}
           </button>
         ))}
       </nav>
@@ -105,6 +106,17 @@ export default function App() {
         }}
       >
         <DocumentsPage onSelectDocument={handleSelectDocument} />
+      </div>
+
+      {/* Progress — review + dashboard */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          display: view === "progress" ? "flex" : "none",
+        }}
+      >
+        <ProgressPage />
       </div>
     </div>
   );

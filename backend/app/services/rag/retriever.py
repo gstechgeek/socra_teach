@@ -106,9 +106,7 @@ async def retrieve(
     query_vec = await asyncio.to_thread(embed_texts, [query])
     vec_rows = await asyncio.to_thread(vector_search, query_vec[0], top_k * 2)
     # LanceDB returns _distance (cosine distance, lower = better) → similarity
-    vec_norm: dict[str, float] = {
-        row["id"]: max(0.0, 1.0 - row["_distance"]) for row in vec_rows
-    }
+    vec_norm: dict[str, float] = {row["id"]: max(0.0, 1.0 - row["_distance"]) for row in vec_rows}
 
     # ── Fuse ──────────────────────────────────────────────────────────────────
     all_ids = set(bm25_norm) | set(vec_norm)

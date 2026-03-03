@@ -32,6 +32,7 @@ def _get_converter() -> object:
         with _converter_lock:
             if _converter is None:
                 from docling.document_converter import DocumentConverter  # noqa: I001  # type: ignore[import-untyped]
+
                 _converter = DocumentConverter()
     return _converter
 

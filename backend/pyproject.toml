@@ -88,7 +88,9 @@ omit = [
     "app/api/routes/progress.py",
     "app/services/tutor/router.py",
     "app/services/rag/*",
-    "app/services/fsrs/*",
+    # card_generator requires network (OpenRouter); store requires LanceDB on disk.
+    "app/services/fsrs/card_generator.py",
+    "app/services/fsrs/store.py",
 ]
 
 [tool.coverage.report]

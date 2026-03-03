@@ -58,10 +58,8 @@ def build_socratic_prompt(
 
     if context:
         prompt = (
-            prompt
-            + "\n\nCONTEXT (passages from the student's textbook — "
-            "ground your Socratic questions in these):\n"
-            + context
+            prompt + "\n\nCONTEXT (passages from the student's textbook — "
+            "ground your Socratic questions in these):\n" + context
         )
 
     system = {"role": "system", "content": prompt}

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     model_path: str = "../models/llama-3.2-1b-instruct-q4_k_m.gguf"
     n_ctx: int = 4096  # NEVER increase beyond 4096 (KV cache OOM on 16 GB)
     n_gpu_layers: int = -1  # -1 = offload all layers to Vulkan
-    max_tokens: int = 512
+    max_tokens: int = 1024
 
     # ── OpenRouter (cloud LLM tiers) ──────────────────────────────────────────
     openrouter_api_key: str = ""

@@ -10,7 +10,6 @@ import httpx
 from app.core.config import settings
 from app.services.rag.reranker import rerank
 from app.services.rag.retriever import rebuild_bm25_index, retrieve
-from app.services.tutor.classifier import classify
 from app.services.tutor.socratic import build_socratic_prompt
 
 # Maps logical tier names to OpenRouter model IDs configured in Settings.
@@ -19,6 +18,10 @@ _CLOUD_MODELS: dict[str, str] = {
     "reasoning": settings.cloud_model_reasoning,  # deepseek/deepseek-r1
     "fast": settings.cloud_model_fast,  # anthropic/claude-haiku-4-5
 }
+
+# The tutor always uses the dialogue tier (claude-sonnet-4-5) for consistency.
+# The local 1B model is too constrained for quality Socratic tutoring on shared VRAM.
+_TUTOR_TIER = "dialogue"
 
 # Separate connect / read timeouts — long reads for reasoning tier streams.
 _OPENROUTER_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
@@ -35,17 +38,12 @@ class StreamMeta:
 async def route_and_stream(
     messages: list[dict[str, str]],
 ) -> AsyncIterator[str | StreamMeta]:
-    """Decide local vs. cloud tier and stream Socratic-framed tokens.
+    """Stream Socratic-framed tokens via the cloud dialogue tier.
 
-    Routing heuristic (Phase 2: classifier-based, Phase 3: RAG-augmented):
-    - Local  : simple recall, Socratic follow-ups, basic hints, offline
-    - dialogue: multi-turn Socratic deepening, misconception diagnosis
-    - reasoning: multi-step math proofs, STEM derivations, LaTeX-heavy answers
-    - fast   : lightweight reformatting, quick confirmations
-
-    RAG context is retrieved and injected into the system prompt when documents
-    have been ingested. If no documents exist, retrieval returns [] and the
-    prompt is unchanged (identical to Phase 2 behaviour).
+    All tutor queries are routed to the dialogue tier (claude-sonnet-4-5)
+    for consistent, high-quality Socratic responses. RAG context is
+    retrieved and injected into the system prompt when documents have
+    been ingested.
 
     Yields a ``StreamMeta`` object first, followed by token strings.
 
@@ -53,8 +51,7 @@ async def route_and_stream(
         messages: OpenAI-format chat history.
 
     Yields:
-        A single StreamMeta, then token strings from whichever model handles
-        the query.
+        A single StreamMeta, then token strings.
     """
     # ── RAG retrieval ─────────────────────────────────────────────────────────
     query = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
@@ -65,23 +62,14 @@ async def route_and_stream(
         if candidates:
             reranked = await rerank(query, candidates, top_k=3)
             if reranked:
-                context = "\n\n".join(
-                    f"[Page {c.page} — {c.section}]\n{c.text}" for c in reranked
-                )
+                context = "\n\n".join(f"[Page {c.page} — {c.section}]\n{c.text}" for c in reranked)
 
-    # ── Route and stream ──────────────────────────────────────────────────────
-    if _route_local(messages):
-        yield StreamMeta(tier="local", model="llama-3.2-1b-instruct-q4_k_m")
-        socratic = build_socratic_prompt(messages, cloud=False, context=context)
-        async for token in _stream_local_async(socratic):
-            yield token
-    else:
-        tier = _select_cloud_tier(messages)
-        model = _CLOUD_MODELS[tier]
-        yield StreamMeta(tier=tier, model=model)
-        socratic = build_socratic_prompt(messages, cloud=True, context=context)
-        async for token in _stream_openrouter(socratic, tier):
-            yield token
+    # ── Always use cloud dialogue tier ────────────────────────────────────────
+    model = _CLOUD_MODELS[_TUTOR_TIER]
+    yield StreamMeta(tier=_TUTOR_TIER, model=model)
+    socratic = build_socratic_prompt(messages, cloud=True, context=context)
+    async for token in _stream_openrouter(socratic, _TUTOR_TIER):
+        yield token
 
 
 async def _warm_bm25() -> None:
@@ -96,45 +84,7 @@ async def _warm_bm25() -> None:
     rebuild_bm25_index(chunks)
 
 
-# ── Routing decision ──────────────────────────────────────────────────────────
-
-
-def _route_local(messages: list[dict[str, str]]) -> bool:
-    """Return True if the query should be handled by the local model.
-
-    Delegates to the intent classifier. Returns True only when the
-    classifier assigns the "local" tier.
-
-    Args:
-        messages: Chat history used to estimate query complexity.
-
-    Returns:
-        True for local inference, False for cloud.
-    """
-    return classify(messages) == "local"
-
-
-def _select_cloud_tier(messages: list[dict[str, str]]) -> str:
-    """Select the OpenRouter model tier for this query.
-
-    Delegates to the intent classifier. Falls back to "dialogue" if the
-    classifier returns "local" (defensive — prevents a KeyError in
-    _CLOUD_MODELS if this function is called directly in tests or future
-    refactoring without going through _route_local first).
-
-    Args:
-        messages: Chat history used to estimate complexity.
-
-    Returns:
-        One of: "dialogue", "reasoning", "fast".
-    """
-    tier = classify(messages)
-    if tier == "local":
-        return "dialogue"
-    return tier
-
-
-# ── Local inference (async wrapper) ──────────────────────────────────────────
+# ── Local inference (async wrapper) — retained for potential offline mode ─────
 
 
 async def _stream_local_async(
