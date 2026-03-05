@@ -1,4 +1,4 @@
-import React, { type FormEvent, useRef, useState } from "react";
+import React, { type FormEvent, type ReactNode, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -7,12 +7,60 @@ import { type Message } from "../hooks/useChat";
 // Phase 6: replace react-markdown with Streamdown (by Vercel) for
 // native streaming markdown + KaTeX + Shiki code highlighting.
 
+const CITATION_RE = /\[p\.\s*(\d+)\]/g;
+
+/** Split text into segments of plain text and citation badges. */
+function parseCitations(
+  text: string,
+  onCitationClick?: (page: number) => void,
+): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  CITATION_RE.lastIndex = 0;
+  while ((match = CITATION_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const page = parseInt(match[1] ?? "0", 10);
+    parts.push(
+      <button
+        key={`cite-${match.index}`}
+        onClick={() => onCitationClick?.(page)}
+        style={{
+          display: "inline",
+          padding: "0.05rem 0.35rem",
+          borderRadius: 3,
+          border: "none",
+          background: "#2563eb33",
+          color: "#93bbfd",
+          fontSize: "0.78em",
+          cursor: onCitationClick ? "pointer" : "default",
+          fontFamily: "inherit",
+          verticalAlign: "baseline",
+        }}
+      >
+        p.{page}
+      </button>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
 interface MessageBubbleProps {
   message: Message;
+  onCitationClick?: (page: number) => void;
 }
 
 const MessageBubble = React.memo(function MessageBubble({
   message,
+  onCitationClick,
 }: MessageBubbleProps) {
   return (
     <div
@@ -36,6 +84,17 @@ const MessageBubble = React.memo(function MessageBubble({
         <ReactMarkdown
           remarkPlugins={[remarkMath]}
           rehypePlugins={[rehypeKatex]}
+          components={{
+            p: ({ children }) => {
+              const processed = React.Children.map(children, (child) => {
+                if (typeof child === "string" && CITATION_RE.test(child)) {
+                  return <>{parseCitations(child, onCitationClick)}</>;
+                }
+                return child;
+              });
+              return <p>{processed}</p>;
+            },
+          }}
         >
           {message.content}
         </ReactMarkdown>
@@ -48,9 +107,10 @@ interface ChatProps {
   messages: Message[];
   isStreaming: boolean;
   onSend: (text: string) => void;
+  onCitationClick?: (page: number) => void;
 }
 
-export function Chat({ messages, isStreaming, onSend }: ChatProps) {
+export function Chat({ messages, isStreaming, onSend, onCitationClick }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -89,7 +149,7 @@ export function Chat({ messages, isStreaming, onSend }: ChatProps) {
           </p>
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} onCitationClick={onCitationClick} />
         ))}
         {isStreaming && (
           <span style={{ color: "#555", fontSize: "0.8rem" }}>Thinking…</span>

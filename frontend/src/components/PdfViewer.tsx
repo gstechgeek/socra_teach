@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Viewer, Worker } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
 
@@ -10,6 +11,7 @@ const WORKER_URL =
 
 interface PdfViewerProps {
   fileUrl: string | null;
+  targetPage?: number; // 0-indexed page to jump to
   onTextSelect?: (selectedText: string) => void;
 }
 
@@ -19,9 +21,19 @@ interface PdfViewerProps {
  * Renders the uploaded PDF immediately (before ingestion completes) so the
  * user can read while background processing runs. Uses the default-layout
  * plugin for sidebar navigation (thumbnails, bookmarks, search).
+ *
+ * When `targetPage` changes, the viewer jumps to that page.
  */
-export function PdfViewer({ fileUrl, onTextSelect: _onTextSelect }: PdfViewerProps) {
-  const defaultLayoutPluginInstance = defaultLayoutPlugin();
+export function PdfViewer({ fileUrl, targetPage, onTextSelect: _onTextSelect }: PdfViewerProps) {
+  // Called at top level — defaultLayoutPlugin() uses hooks internally
+  const pluginInstance = defaultLayoutPlugin();
+
+  // Jump to page when targetPage changes
+  useEffect(() => {
+    if (targetPage === undefined || targetPage < 0 || !pluginInstance) return;
+    const nav = pluginInstance.toolbarPluginInstance.pageNavigationPluginInstance;
+    nav.jumpToPage(targetPage);
+  }, [targetPage, pluginInstance]);
 
   if (!fileUrl) {
     return (
@@ -58,7 +70,7 @@ export function PdfViewer({ fileUrl, onTextSelect: _onTextSelect }: PdfViewerPro
       }}
     >
       <Worker workerUrl={WORKER_URL}>
-        <Viewer fileUrl={fileUrl} plugins={[defaultLayoutPluginInstance]} />
+        <Viewer fileUrl={fileUrl} plugins={[pluginInstance]} />
       </Worker>
     </div>
   );

@@ -12,14 +12,21 @@ export interface StreamMetadata {
   model: string;
 }
 
+export interface SourceRef {
+  doc_id: string;
+  page: number;
+  section: string;
+}
+
 class FatalSSEError extends Error {}
 
 
-interface UseChatReturn {
+export interface UseChatReturn {
   messages: Message[];
   isStreaming: boolean;
   streamError: string | null;
   metadata: StreamMetadata | null;
+  sources: SourceRef[];
   send: (text: string) => Promise<void>;
   reset: () => void;
 }
@@ -35,6 +42,7 @@ export function useChat(sessionId?: string): UseChatReturn {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<StreamMetadata | null>(null);
+  const [sources, setSources] = useState<SourceRef[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const lastSeqRef = useRef(-1);
@@ -67,6 +75,7 @@ export function useChat(sessionId?: string): UseChatReturn {
       setMessages(nextMessages);
       setIsStreaming(true);
       setStreamError(null);
+      setSources([]);
       lastSeqRef.current = -1;
 
       const ctrl = new AbortController();
@@ -90,6 +99,11 @@ export function useChat(sessionId?: string): UseChatReturn {
             if (event.event === "metadata") {
               const meta = JSON.parse(event.data) as StreamMetadata;
               setMetadata(meta);
+              return;
+            }
+            if (event.event === "sources") {
+              const refs = JSON.parse(event.data) as SourceRef[];
+              setSources(refs);
               return;
             }
             if (event.event === "error") {
@@ -148,5 +162,5 @@ export function useChat(sessionId?: string): UseChatReturn {
     setIsStreaming(false);
   }, []);
 
-  return { messages, isStreaming, streamError, metadata, send, reset };
+  return { messages, isStreaming, streamError, metadata, sources, send, reset };
 }

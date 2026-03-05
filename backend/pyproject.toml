@@ -22,8 +22,7 @@ dependencies = [
     # See scripts/setup.sh for the full setup sequence.
     "llama-cpp-python>=0.3.2",
     # Document ingestion (Phase 3)
-    "docling>=2.5.0",
-    "einops>=0.8.2",
+    "pymupdf4llm>=0.0.17",
 ]
 
 [dependency-groups]
@@ -68,7 +67,7 @@ module = ["app.services.fsrs.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-# docling, lancedb, sentence-transformers, rank-bm25, pyarrow — no py.typed markers.
+# pymupdf4llm, lancedb, sentence-transformers, rank-bm25, pyarrow — no py.typed markers.
 module = ["app.services.rag.*"]
 ignore_errors = true
 

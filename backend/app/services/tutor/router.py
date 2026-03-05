@@ -35,9 +35,25 @@ class StreamMeta:
     model: str  # e.g. "llama-3.2-1b-instruct-q4_k_m" or "anthropic/claude-sonnet-4-5"
 
 
+@dataclass(frozen=True, slots=True)
+class SourceRef:
+    """A single citation source from RAG retrieval."""
+
+    doc_id: str
+    page: int
+    section: str
+
+
+@dataclass(frozen=True, slots=True)
+class StreamSources:
+    """Citation sources emitted once before tokens begin."""
+
+    sources: list[SourceRef]
+
+
 async def route_and_stream(
     messages: list[dict[str, str]],
-) -> AsyncIterator[str | StreamMeta]:
+) -> AsyncIterator[str | StreamMeta | StreamSources]:
     """Stream Socratic-framed tokens via the cloud dialogue tier.
 
     All tutor queries are routed to the dialogue tier (claude-sonnet-4-5)
@@ -45,28 +61,39 @@ async def route_and_stream(
     retrieved and injected into the system prompt when documents have
     been ingested.
 
-    Yields a ``StreamMeta`` object first, followed by token strings.
+    Yields ``StreamMeta``, then ``StreamSources`` (if RAG context found),
+    then token strings.
 
     Args:
         messages: OpenAI-format chat history.
 
     Yields:
-        A single StreamMeta, then token strings.
+        StreamMeta, optional StreamSources, then token strings.
     """
     # ── RAG retrieval ─────────────────────────────────────────────────────────
     query = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
 
     context: str | None = None
+    sources: list[SourceRef] = []
     if query:
         candidates = await retrieve(query, top_k=10)
         if candidates:
             reranked = await rerank(query, candidates, top_k=3)
             if reranked:
                 context = "\n\n".join(f"[Page {c.page} — {c.section}]\n{c.text}" for c in reranked)
+                # Deduplicate sources by (doc_id, page)
+                seen: set[tuple[str, int]] = set()
+                for c in reranked:
+                    key = (c.doc_id, c.page)
+                    if key not in seen:
+                        seen.add(key)
+                        sources.append(SourceRef(doc_id=c.doc_id, page=c.page, section=c.section))
 
     # ── Always use cloud dialogue tier ────────────────────────────────────────
     model = _CLOUD_MODELS[_TUTOR_TIER]
     yield StreamMeta(tier=_TUTOR_TIER, model=model)
+    if sources:
+        yield StreamSources(sources=sources)
     socratic = build_socratic_prompt(messages, cloud=True, context=context)
     async for token in _stream_openrouter(socratic, _TUTOR_TIER):
         yield token
@@ -164,6 +191,9 @@ async def _stream_openrouter(
                 if not line.startswith("data: ") or line == "data: [DONE]":
                     continue
                 chunk = json.loads(line[6:])
-                content: str = chunk["choices"][0].get("delta", {}).get("content", "")
+                choices = chunk.get("choices")
+                if not choices:
+                    continue
+                content: str = choices[0].get("delta", {}).get("content", "")
                 if content:
                     yield content

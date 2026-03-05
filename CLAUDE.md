@@ -86,19 +86,13 @@ npm run lint      # ESLint + Prettier check
 
 ## First-Run Setup (Phase 3+ — RAG pipeline)
 
-The RAG pipeline downloads three sets of ML models from HuggingFace on first use.
-**These downloads must complete before ingestion or retrieval will work.**
+The RAG pipeline downloads two sets of ML models from HuggingFace on first use.
+**These downloads must complete before retrieval will work.**
+PDF ingestion uses PyMuPDF (no model downloads needed).
 Run the following once inside Distrobox before starting the server for the first time
 after Phase 3 code is deployed:
 
 ```bash
-# Pre-download Docling layout/OCR models (~1–2 GB)
-uv run python -c "
-from docling.document_converter import DocumentConverter
-DocumentConverter()  # triggers model download
-print('Docling models ready')
-"
-
 # Pre-download nomic-embed-text-v1.5 (~130 MB)
 uv run python -c "
 from app.services.rag.embedder import get_embedder
@@ -140,7 +134,7 @@ and restart ingestion.
 | Embeddings | nomic-embed-text-v1.5 |
 | Vector DB | LanceDB (local) + Supabase pgvector (cloud sync) |
 | RAG | Hybrid BM25 (0.6) + vector (0.4) + cross-encoder re-rank |
-| Ingestion | Docling (on-device) + MinerU (pre-process) |
+| Ingestion | PyMuPDF + pymupdf4llm (on-device, no ML models) |
 | Backend | FastAPI + sse-starlette (streaming SSE) |
 | Frontend | React 18 + TypeScript + Vite |
 | UI libs | @react-pdf-viewer, KaTeX, Streamdown |
@@ -215,4 +209,10 @@ and restart ingestion.
 | No `.gguf`, LanceDB data, or `.env` committed | Model files are large; secrets must never enter git history |
 | Use `httpx`, not `requests` | `requests` is synchronous; async FastAPI requires async HTTP |
 | Never use `.to_lance()` in `store.py` | Requires optional `lance` C-extension; use `.to_arrow()` + pyarrow compute instead |
-| Pre-download ML models before first ingest | Docling, nomic-embed, cross-encoder all pull from HuggingFace on first use — see First-Run Setup |
+| Pre-download ML models before first retrieval | nomic-embed, cross-encoder pull from HuggingFace on first use — see First-Run Setup |
+
+---
+
+## Session Handover
+
+At the end of each working session, run `/handover` to update `docs/HANDOVER.md` with current progress. This keeps a running log of what was done, what's broken, and what's next — so the next session (or a different agent) can pick up without context loss.

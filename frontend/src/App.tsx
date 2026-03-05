@@ -4,6 +4,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { PdfViewer } from "./components/PdfViewer";
 import { ProgressPage } from "./pages/ProgressPage";
 import { TutorPage } from "./pages/TutorPage";
+import { useChat } from "./hooks/useChat";
 
 type View = "tutor" | "documents" | "progress";
 
@@ -11,14 +12,24 @@ const NAV_HEIGHT = 40;
 
 // App sets up the top nav and switches between the Tutor split-pane and
 // the Documents management page. The left panel renders the PDF viewer.
+// useChat is lifted here so citation clicks can bridge Chat → PdfViewer.
 export default function App() {
   const [view, setView] = useState<View>("tutor");
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const [targetPage, setTargetPage] = useState<number | undefined>(undefined);
+
+  const chat = useChat();
 
   const pdfUrl = activeDocId ? `/api/documents/${activeDocId}/file` : null;
 
   const handleSelectDocument = useCallback((docId: string) => {
     setActiveDocId(docId);
+    setView("tutor");
+  }, []);
+
+  const handleCitationClick = useCallback((page: number) => {
+    // Citations are 1-indexed; PDF viewer is 0-indexed
+    setTargetPage(page - 1);
     setView("tutor");
   }, []);
 
@@ -83,7 +94,7 @@ export default function App() {
         <PanelGroup direction="horizontal" style={{ flex: 1 }}>
           {/* Left pane — PDF viewer */}
           <Panel defaultSize={45} minSize={20} style={{ overflow: "hidden" }}>
-            <PdfViewer fileUrl={pdfUrl} />
+            <PdfViewer fileUrl={pdfUrl} targetPage={targetPage} />
           </Panel>
 
           <PanelResizeHandle
@@ -92,7 +103,7 @@ export default function App() {
 
           {/* Right pane — Socratic chat */}
           <Panel defaultSize={55} minSize={30} style={{ overflow: "hidden" }}>
-            <TutorPage />
+            <TutorPage chat={chat} onCitationClick={handleCitationClick} />
           </Panel>
         </PanelGroup>
       </div>

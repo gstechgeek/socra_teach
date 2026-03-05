@@ -58,7 +58,9 @@ def build_socratic_prompt(
 
     if context:
         prompt = (
-            prompt + "\n\nCONTEXT (passages from the student's textbook — "
+            prompt + "\n8. When referencing textbook content, cite the source as "
+            "[p. N] where N is the page number from the CONTEXT header."
+            "\n\nCONTEXT (passages from the student's textbook — "
             "ground your Socratic questions in these):\n" + context
         )
 

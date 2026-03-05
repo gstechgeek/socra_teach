@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from app.services.tutor.router import StreamMeta, route_and_stream
+from app.services.tutor.router import StreamMeta, StreamSources, route_and_stream
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,14 @@ async def chat_stream(request: ChatRequest) -> EventSourceResponse:
                     yield {
                         "event": "metadata",
                         "data": json.dumps({"tier": item.tier, "model": item.model}),
+                    }
+                elif isinstance(item, StreamSources):
+                    yield {
+                        "event": "sources",
+                        "data": json.dumps([
+                            {"doc_id": s.doc_id, "page": s.page, "section": s.section}
+                            for s in item.sources
+                        ]),
                     }
                 else:
                     response_chunks.append(item)
