@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import chat, documents, health, progress
 from app.core.config import settings
+
+# ── Logging setup ────────────────────────────────────────────────────────────
+# Configure the "app" logger so all app.services.rag.*, app.api.*, etc.
+# loggers emit at INFO level with a consistent format.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 
 @asynccontextmanager

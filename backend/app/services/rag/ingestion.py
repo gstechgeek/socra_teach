@@ -234,15 +234,20 @@ def _run_ingestion(doc_id: str, file_path: Path, filename: str) -> None:
     """
     from app.services.rag.retriever import rebuild_bm25_index
 
+    logger.info("[%s] Starting ingestion for '%s'", doc_id[:8], filename)
     upsert_document(doc_id, filename, "processing", 0, "Extracting text from PDF…")
 
     try:
         # ── Extract ──────────────────────────────────────────────────────
+        logger.info("[%s] Extracting text from PDF…", doc_id[:8])
         pages = _extract_markdown_pages(file_path)
 
         if not pages:
+            logger.error("[%s] No text extracted from '%s'", doc_id[:8], filename)
             upsert_document(doc_id, filename, "error", 0, "No text extracted from document")
             return
+
+        logger.info("[%s] Extracted %d page(s)", doc_id[:8], len(pages))
 
         # Warn about image-only pages (pages with very little text)
         doc = fitz.open(str(file_path))
@@ -257,22 +262,27 @@ def _run_ingestion(doc_id: str, file_path: Path, filename: str) -> None:
 
         if image_only:
             logger.warning(
-                "Document %s: %d image-only page(s) skipped (no text layer): %s",
-                filename,
+                "[%s] %d image-only page(s) skipped (no text layer): %s",
+                doc_id[:8],
                 len(image_only),
-                image_only[:10],  # log first 10
+                image_only[:10],
             )
 
         # ── Chunk ────────────────────────────────────────────────────────
+        logger.info("[%s] Chunking %d page(s)…", doc_id[:8], len(pages))
         upsert_document(doc_id, filename, "processing", 0, f"Chunking {len(pages)} pages…")
         chunk_dicts = _markdown_section_chunks(pages, doc_id)
 
         if not chunk_dicts:
+            logger.error("[%s] Chunking produced 0 chunks for '%s'", doc_id[:8], filename)
             upsert_document(doc_id, filename, "error", 0, "No text extracted from document")
             return
 
+        logger.info("[%s] Produced %d chunk(s)", doc_id[:8], len(chunk_dicts))
+
         # ── Embed ────────────────────────────────────────────────────────
         n = len(chunk_dicts)
+        logger.info("[%s] Embedding %d chunk(s)…", doc_id[:8], n)
         upsert_document(
             doc_id, filename, "processing", 0, f"Embedding {n} chunk{'s' if n != 1 else ''}…"
         )
@@ -281,16 +291,22 @@ def _run_ingestion(doc_id: str, file_path: Path, filename: str) -> None:
         for chunk, vec in zip(chunk_dicts, vectors, strict=True):
             chunk["vector"] = vec
 
+        logger.info("[%s] Embedding complete", doc_id[:8])
+
         # ── Store ────────────────────────────────────────────────────────
+        logger.info("[%s] Storing %d chunk(s) in LanceDB…", doc_id[:8], n)
         upsert_document(doc_id, filename, "processing", 0, "Storing in database…")
         insert_chunks(chunk_dicts)
 
         # ── Rebuild BM25 ─────────────────────────────────────────────────
+        logger.info("[%s] Rebuilding BM25 index…", doc_id[:8])
         rebuild_bm25_index(get_all_chunk_texts())
 
         upsert_document(doc_id, filename, "done", len(chunk_dicts), "")
+        logger.info("[%s] Ingestion complete — %d chunks stored", doc_id[:8], len(chunk_dicts))
 
     except Exception as exc:  # noqa: BLE001
+        logger.exception("[%s] Ingestion failed for '%s'", doc_id[:8], filename)
         upsert_document(doc_id, filename, "error", 0, str(exc))
 
 

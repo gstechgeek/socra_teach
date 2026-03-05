@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     cloud_model_fast: str = "anthropic/claude-haiku-4-5"
 
     # ── Embeddings ────────────────────────────────────────────────────────────
+    embedding_provider: str = "openrouter"  # "local" (sentence-transformers) or "openrouter"
     embedding_model: str = "nomic-ai/nomic-embed-text-v1.5"
+    cloud_embedding_model: str = "openai/text-embedding-3-small"
     embedding_dim: int = 256  # Matryoshka reduced dimension
 
     # ── Vector store ──────────────────────────────────────────────────────────

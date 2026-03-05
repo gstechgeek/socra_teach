@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
 from app.services.rag.embedder import embed_texts
 from app.services.rag.store import fetch_chunks_by_ids, vector_search
+
+logger = logging.getLogger(__name__)
 
 # ── BM25 in-memory index ──────────────────────────────────────────────────────
 # Rebuilt from LanceDB on server startup and after each successful ingestion.
@@ -29,10 +32,12 @@ def rebuild_bm25_index(chunks: list[tuple[str, str]]) -> None:
     if not chunks:
         _bm25 = None
         _bm25_ids = []
+        logger.info("BM25 index cleared (no chunks)")
         return
     _bm25_ids = [cid for cid, _ in chunks]
     tokenized = [text.lower().split() for _, text in chunks]
     _bm25 = BM25Okapi(tokenized)
+    logger.info("BM25 index rebuilt with %d chunk(s)", len(chunks))
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -93,7 +98,10 @@ async def retrieve(
         Empty list if no documents are ingested.
     """
     if _bm25 is None:
+        logger.debug("Retrieval skipped — no BM25 index (no documents ingested)")
         return []
+
+    logger.info("Retrieving top-%d for query: %.80s…", top_k, query)
 
     # ── BM25 scores ───────────────────────────────────────────────────────────
     bm25_raw = _bm25.get_scores(query.lower().split())
@@ -117,6 +125,7 @@ async def retrieve(
 
     top_ids = sorted(fused, key=fused.__getitem__, reverse=True)[:top_k]
     rows = await asyncio.to_thread(fetch_chunks_by_ids, top_ids)
+    logger.info("Retrieved %d chunk(s), top score=%.4f", len(rows), fused[top_ids[0]])
 
     return [
         RetrievedChunk(

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import lru_cache
 
 from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
 
 from app.services.rag.retriever import RetrievedChunk
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -46,7 +49,10 @@ async def rerank(
     if not chunks:
         return []
 
+    logger.info("Re-ranking %d chunk(s) for query: %.80s…", len(chunks), query)
     pairs = [(query, c.text) for c in chunks]
     scores = await asyncio.to_thread(_get_cross_encoder().predict, pairs)
-    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
-    return [c for _, c in ranked[:top_k]]
+    ranked = sorted(zip(scores, chunks, strict=True), key=lambda x: x[0], reverse=True)
+    result = [c for _, c in ranked[:top_k]]
+    logger.info("Re-ranking complete — returning top %d", len(result))
+    return result

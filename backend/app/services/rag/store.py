@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ import pyarrow as pa  # type: ignore[import-untyped]
 import pyarrow.compute as pc  # type: ignore[import-untyped]
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # ── Table names ───────────────────────────────────────────────────────────────
 
@@ -54,6 +57,7 @@ def get_db() -> Any:
     """
     db_path = Path(settings.lancedb_path)
     db_path.mkdir(parents=True, exist_ok=True)
+    logger.info("Connecting to LanceDB at %s", db_path)
     return lancedb.connect(str(db_path))
 
 
@@ -97,6 +101,7 @@ def insert_chunks(rows: list[dict[str, Any]]) -> None:
         return
     tbl = get_chunks_table()
     tbl.add(rows)
+    logger.info("Inserted %d chunk(s) into LanceDB", len(rows))
 
 
 def upsert_document(
@@ -228,6 +233,7 @@ def delete_document(doc_id: str) -> None:
     Args:
         doc_id: Document UUID to remove.
     """
+    logger.info("Deleting document %s and its chunks", doc_id[:8])
     db = get_db()
     if _DOCUMENTS_TABLE in db.table_names():
         get_documents_table().delete(f'doc_id = "{doc_id}"')
