@@ -111,7 +111,25 @@ async def extract_cards_from_conversation(
                 content = content[:-3]
             content = content.strip()
 
-            parsed = json.loads(content)
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                # LLM sometimes returns extra text after the JSON object.
+                # Try to extract the first valid JSON object from the response.
+                brace_start = content.find("{")
+                if brace_start == -1:
+                    return []
+                depth = 0
+                end = brace_start
+                for i, ch in enumerate(content[brace_start:], start=brace_start):
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                parsed = json.loads(content[brace_start:end])
             cards_data = parsed.get("cards", [])
 
             return [

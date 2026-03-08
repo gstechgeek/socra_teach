@@ -53,6 +53,7 @@ class StreamSources:
 
 async def route_and_stream(
     messages: list[dict[str, str]],
+    selection: dict[str, object] | None = None,
 ) -> AsyncIterator[str | StreamMeta | StreamSources]:
     """Stream Socratic-framed tokens via the cloud dialogue tier.
 
@@ -61,11 +62,16 @@ async def route_and_stream(
     retrieved and injected into the system prompt when documents have
     been ingested.
 
+    When ``selection`` is provided (a captured rectangle from the PDF viewer),
+    the last user message is converted to multimodal format with the image
+    so the cloud model can see the selected diagram or text.
+
     Yields ``StreamMeta``, then ``StreamSources`` (if RAG context found),
     then token strings.
 
     Args:
         messages: OpenAI-format chat history.
+        selection: Optional dict with ``image_base64`` (str) and ``page`` (int | None).
 
     Yields:
         StreamMeta, optional StreamSources, then token strings.
@@ -95,8 +101,67 @@ async def route_and_stream(
     if sources:
         yield StreamSources(sources=sources)
     socratic = build_socratic_prompt(messages, cloud=True, context=context)
-    async for token in _stream_openrouter(socratic, _TUTOR_TIER):
+
+    # If a PDF selection was captured, convert the last user message to
+    # multimodal format (OpenAI vision API) so the cloud model can see it.
+    api_messages: list[dict[str, object]] = [dict(m) for m in socratic]
+    if selection:
+        api_messages = _inject_selection_image(api_messages, selection)
+
+    async for token in _stream_openrouter(api_messages, _TUTOR_TIER):
         yield token
+
+
+def _inject_selection_image(
+    messages: list[dict[str, object]],
+    selection: dict[str, object],
+) -> list[dict[str, object]]:
+    """Convert the last user message to multimodal format with the selection image.
+
+    Finds the last user message and replaces its ``content`` string with
+    a list of content parts (text + image_url) following the OpenAI vision
+    API format supported by OpenRouter.
+
+    Args:
+        messages: Socratic-framed message list (may contain str content).
+        selection: Dict with ``image_base64`` and optional ``page``.
+
+    Returns:
+        A new message list with the last user message converted to multimodal.
+    """
+    image_b64 = str(selection.get("image_base64", ""))
+    page = selection.get("page")
+    if not image_b64:
+        return messages
+
+    result: list[dict[str, object]] = []
+    last_user_idx = -1
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "user":
+            last_user_idx = i
+
+    for i, msg in enumerate(messages):
+        if i == last_user_idx:
+            text_content = str(msg.get("content", ""))
+            page_note = f" (selected from page {page})" if page else ""
+            content_parts: list[dict[str, object]] = [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        f"The student selected the above area from their textbook"
+                        f"{page_note}. Their question: {text_content}"
+                    ),
+                },
+            ]
+            result.append({"role": "user", "content": content_parts})
+        else:
+            result.append(msg)
+
+    return result
 
 
 async def _warm_bm25() -> None:
@@ -154,7 +219,7 @@ async def _stream_local_async(
 
 
 async def _stream_openrouter(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, object]],
     tier: str,
 ) -> AsyncIterator[str]:
     """Stream tokens from an OpenRouter model via the OpenAI-compatible API.
@@ -162,7 +227,7 @@ async def _stream_openrouter(
     Uses raw httpx streaming — no openai SDK dependency.
 
     Args:
-        messages: Socratic-framed message list.
+        messages: Socratic-framed message list (may contain multimodal content).
         tier: One of "dialogue", "reasoning", "fast".
 
     Yields:

@@ -21,13 +21,20 @@ export interface SourceRef {
 class FatalSSEError extends Error {}
 
 
+export interface SelectionAttachment {
+  /** Base64-encoded PNG image of the selected area. */
+  imageBase64: string;
+  /** 1-indexed page number (best-effort). */
+  page: number | null;
+}
+
 export interface UseChatReturn {
   messages: Message[];
   isStreaming: boolean;
   streamError: string | null;
   metadata: StreamMetadata | null;
   sources: SourceRef[];
-  send: (text: string) => Promise<void>;
+  send: (text: string, attachment?: SelectionAttachment) => Promise<void>;
   reset: () => void;
 }
 
@@ -54,7 +61,7 @@ export function useChat(sessionId?: string): UseChatReturn {
   }, [messages]);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, attachment?: SelectionAttachment) => {
       if (isStreaming) return;
 
       const userMessage: Message = {
@@ -91,6 +98,14 @@ export function useChat(sessionId?: string): UseChatReturn {
               content: m.content,
             })),
             session_id: sessionId ?? null,
+            ...(attachment
+              ? {
+                  selection_context: {
+                    image_base64: attachment.imageBase64,
+                    page: attachment.page,
+                  },
+                }
+              : {}),
           }),
           signal: ctrl.signal,
           openWhenHidden: true,

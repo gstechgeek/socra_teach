@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 
 from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
 from app.services.rag.embedder import embed_texts
-from app.services.rag.store import fetch_chunks_by_ids, vector_search
+from app.services.rag.store import fetch_chunks_by_ids, fetch_chunks_by_page, vector_search
+
+# Regex to extract page references from user queries.
+# Matches: "page 112", "p. 112", "p.112", "p 112", "pg 112", "pg. 112"
+_PAGE_REF_RE = re.compile(r"\b(?:page|p\.?|pg\.?)\s*(\d+)\b", re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -17,25 +22,35 @@ logger = logging.getLogger(__name__)
 
 _bm25: BM25Okapi | None = None
 _bm25_ids: list[str] = []
+_bm25_pages: list[int] = []  # page number for each chunk (parallel to _bm25_ids)
 
 
-def rebuild_bm25_index(chunks: list[tuple[str, str]]) -> None:
-    """Rebuild the in-memory BM25 index from a list of (id, text) tuples.
+def rebuild_bm25_index(chunks: list[tuple[str, str, int]]) -> None:
+    """Rebuild the in-memory BM25 index from a list of (id, text, page) tuples.
 
     Called on server startup (to restore index from existing LanceDB data)
     and after each successful document ingestion.
 
+    Prepends ``page N`` to each chunk's tokens so BM25 naturally matches
+    queries that reference specific page numbers.
+
     Args:
-        chunks: List of (chunk_id, text) tuples for all stored chunks.
+        chunks: List of (chunk_id, text, page) tuples for all stored chunks.
     """
-    global _bm25, _bm25_ids
+    global _bm25, _bm25_ids, _bm25_pages
     if not chunks:
         _bm25 = None
         _bm25_ids = []
+        _bm25_pages = []
         logger.info("BM25 index cleared (no chunks)")
         return
-    _bm25_ids = [cid for cid, _ in chunks]
-    tokenized = [text.lower().split() for _, text in chunks]
+    _bm25_ids = [cid for cid, _, _ in chunks]
+    _bm25_pages = [page for _, _, page in chunks]
+    # Prepend "page N" so BM25 matches queries like "page 112"
+    tokenized = [
+        ["page", str(page)] + text.lower().split()
+        for _, text, page in chunks
+    ]
     _bm25 = BM25Okapi(tokenized)
     logger.info("BM25 index rebuilt with %d chunk(s)", len(chunks))
 
@@ -103,6 +118,13 @@ async def retrieve(
 
     logger.info("Retrieving top-%d for query: %.80s…", top_k, query)
 
+    # ── Extract page references from the query ─────────────────────────────────
+    mentioned_pages: set[int] = set()
+    for m in _PAGE_REF_RE.finditer(query):
+        mentioned_pages.add(int(m.group(1)))
+    if mentioned_pages:
+        logger.info("Query references page(s): %s", mentioned_pages)
+
     # ── BM25 scores ───────────────────────────────────────────────────────────
     bm25_raw = _bm25.get_scores(query.lower().split())
     bm25_max = float(bm25_raw.max()) if bm25_raw.max() > 0 else 1.0
@@ -116,12 +138,31 @@ async def retrieve(
     # LanceDB returns _distance (cosine distance, lower = better) → similarity
     vec_norm: dict[str, float] = {row["id"]: max(0.0, 1.0 - row["_distance"]) for row in vec_rows}
 
+    # ── Page-aware chunk injection ─────────────────────────────────────────────
+    # If the query mentions specific pages, fetch all chunks from those pages
+    # and inject them into the candidate set so they participate in fusion.
+    # Build id → page lookup from BM25 index for boosting.
+    id_to_page: dict[str, int] = dict(zip(_bm25_ids, _bm25_pages, strict=False))
+    if mentioned_pages:
+        for page_num in mentioned_pages:
+            page_rows = await asyncio.to_thread(fetch_chunks_by_page, page_num)
+            for row in page_rows:
+                cid = row["id"]
+                id_to_page[cid] = row["page"]
+                if cid not in vec_norm:
+                    vec_norm[cid] = 0.0
+                if cid not in bm25_norm:
+                    bm25_norm[cid] = 0.0
+
     # ── Fuse ──────────────────────────────────────────────────────────────────
     all_ids = set(bm25_norm) | set(vec_norm)
-    fused: dict[str, float] = {
-        cid: bm25_weight * bm25_norm.get(cid, 0.0) + vector_weight * vec_norm.get(cid, 0.0)
-        for cid in all_ids
-    }
+    page_boost = 0.3  # Additive boost for chunks from a mentioned page
+    fused: dict[str, float] = {}
+    for cid in all_ids:
+        score = bm25_weight * bm25_norm.get(cid, 0.0) + vector_weight * vec_norm.get(cid, 0.0)
+        if mentioned_pages and id_to_page.get(cid) in mentioned_pages:
+            score += page_boost
+        fused[cid] = score
 
     top_ids = sorted(fused, key=fused.__getitem__, reverse=True)[:top_k]
     rows = await asyncio.to_thread(fetch_chunks_by_ids, top_ids)

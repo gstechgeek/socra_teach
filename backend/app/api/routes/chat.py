@@ -17,11 +17,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class SelectionContext(BaseModel):
+    """Image selection from the PDF viewer."""
+
+    image_base64: str
+    page: int | None = None
+
+
 class ChatRequest(BaseModel):
     """Incoming chat request payload."""
 
     messages: list[dict[str, str]]
     session_id: str | None = None
+    selection_context: SelectionContext | None = None
 
 
 @router.post("/stream")
@@ -51,7 +59,13 @@ async def chat_stream(request: ChatRequest) -> EventSourceResponse:
         response_chunks: list[str] = []
         error_occurred = False
         try:
-            async for item in route_and_stream(request.messages):
+            selection: dict[str, object] | None = None
+            if request.selection_context:
+                selection = {
+                    "image_base64": request.selection_context.image_base64,
+                    "page": request.selection_context.page,
+                }
+            async for item in route_and_stream(request.messages, selection=selection):
                 if isinstance(item, StreamMeta):
                     yield {
                         "event": "metadata",

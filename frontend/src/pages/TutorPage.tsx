@@ -1,16 +1,18 @@
 import { Chat } from "../components/Chat";
-import type { UseChatReturn } from "../hooks/useChat";
+import type { SelectionAttachment, UseChatReturn } from "../hooks/useChat";
 
 interface TutorPageProps {
   chat: UseChatReturn;
   onCitationClick?: (page: number) => void;
+  pendingSelection?: SelectionAttachment | null;
+  onClearSelection?: () => void;
 }
 
 /**
  * TutorPage composes the chat interface with session state management.
  * Receives chat state from App (lifted for citation bridging to PdfViewer).
  */
-export function TutorPage({ chat, onCitationClick }: TutorPageProps) {
+export function TutorPage({ chat, onCitationClick, pendingSelection, onClearSelection }: TutorPageProps) {
   const { messages, isStreaming, streamError, metadata, sources, send } = chat;
 
   return (
@@ -101,6 +103,8 @@ export function TutorPage({ chat, onCitationClick }: TutorPageProps) {
           isStreaming={isStreaming}
           onSend={send}
           onCitationClick={onCitationClick}
+          pendingSelection={pendingSelection}
+          onClearSelection={onClearSelection}
         />
       </div>
     </div>

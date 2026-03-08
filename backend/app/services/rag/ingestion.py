@@ -21,11 +21,54 @@ logger = logging.getLogger(__name__)
 # Regex matching markdown headers h1–h4
 _HEADER_RE = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
 
-# Invisible marker injected between pages so chunks can track page origin
-_PAGE_MARKER_RE = re.compile(r"<!-- PAGE:(\d+) -->")
-
 
 # ── PDF extraction ──────────────────────────────────────────────────────────
+
+
+def _build_page_label_map(doc: fitz.Document) -> dict[int, int]:
+    """Build a mapping from 0-indexed PDF page to printed page number.
+
+    Many textbooks embed page labels in the PDF (e.g., front matter uses
+    roman numerals, then arabic numbering starts at 1 for chapter 1).
+    PyMuPDF exposes these via ``page.get_label()``.
+
+    Args:
+        doc: An open PyMuPDF document.
+
+    Returns:
+        Dict mapping 0-indexed PDF page to integer printed page number.
+        Only includes pages whose label is a valid positive integer.
+    """
+    label_map: dict[int, int] = {}
+    for i in range(len(doc)):
+        try:
+            label = doc[i].get_label()
+        except Exception:  # noqa: BLE001
+            continue
+        if label and label.isdigit():
+            num = int(label)
+            if num > 0:
+                label_map[i] = num
+    return label_map
+
+
+def _resolve_page_number(
+    page_idx: int,
+    label_map: dict[int, int],
+) -> int:
+    """Convert a 0-indexed PDF page to the best page number for the user.
+
+    Uses the PDF page label (printed page number) when available,
+    otherwise falls back to 1-indexed PDF page.
+
+    Args:
+        page_idx: 0-indexed PDF page index.
+        label_map: Output of :func:`_build_page_label_map`.
+
+    Returns:
+        The printed page number, or ``page_idx + 1`` as fallback.
+    """
+    return label_map.get(page_idx, page_idx + 1)
 
 
 def _extract_markdown_pages(file_path: Path) -> list[tuple[int, str]]:
@@ -36,13 +79,26 @@ def _extract_markdown_pages(file_path: Path) -> list[tuple[int, str]]:
     falls back to raw ``fitz.Page.get_text()`` which is more robust with
     PDFs that have garbled font metadata or unusual encodings.
 
+    Page numbers use the PDF's embedded page labels (printed page numbers)
+    when available, so chunks are tagged with the numbers users actually
+    see in their textbook rather than raw PDF page indices.
+
     Args:
         file_path: Path to the PDF file.
 
     Returns:
-        List of ``(page_number, markdown_text)`` tuples.  Page numbers are
-        1-indexed to match the existing chunk schema convention.
+        List of ``(page_number, markdown_text)`` tuples.  Page numbers
+        use printed labels when available, otherwise 1-indexed PDF page.
     """
+    # ── Build page label map for printed page numbers ──────────────
+    doc = fitz.open(str(file_path))
+    label_map = _build_page_label_map(doc)
+    if label_map:
+        logger.info(
+            "PDF has page labels — using printed page numbers (e.g., PDF page 0 → p.%d)",
+            next(iter(label_map.values())),
+        )
+
     # ── Attempt 1: pymupdf4llm for markdown-formatted output ──────────
     md_pages: list[dict[str, object]] = pymupdf4llm.to_markdown(
         str(file_path),
@@ -56,17 +112,16 @@ def _extract_markdown_pages(file_path: Path) -> list[tuple[int, str]]:
         text = str(page_dict.get("text", ""))
         if text.strip():
             md_extracted.add(page_idx)
-            result.append((page_idx + 1, text))
+            result.append((_resolve_page_number(page_idx, label_map), text))
 
     # ── Attempt 2: fitz fallback for pages pymupdf4llm missed ────────
-    doc = fitz.open(str(file_path))
     fallback_count = 0
     for i in range(len(doc)):
         if i in md_extracted:
             continue
         text = doc[i].get_text().strip()
         if len(text) > 50:
-            result.append((i + 1, text))
+            result.append((_resolve_page_number(i, label_map), text))
             fallback_count += 1
     doc.close()
 
@@ -101,20 +156,24 @@ def _sliding_window_chunks(text: str, size: int = 1000, overlap: int = 200) -> l
     return [c for c in chunks if c.strip()]
 
 
-def _markdown_section_chunks(
+def _page_first_chunks(
     pages: list[tuple[int, str]],
     doc_id: str,
     max_chunk_size: int = 1500,
     overlap: int = 200,
 ) -> list[dict[str, object]]:
-    """Split page markdown into semantic chunks based on markdown headers.
+    """Split pages into chunks using a page-first strategy.
+
+    Unlike the old header-first approach (which merged all pages into one
+    string and split on headers — breaking page tracking when headers were
+    sparse), this processes each page independently so every chunk gets
+    the correct page number trivially.
 
     Strategy:
-      1. Merge all pages into one string with ``<!-- PAGE:N -->`` markers.
-      2. Split on markdown headers (h1–h4) to produce semantic sections.
-      3. Each section inherits the page number of its starting page marker.
-      4. Sections exceeding *max_chunk_size* are sub-split via sliding window.
-      5. Pages with no headers fall back to sliding window directly.
+      1. Process each page individually — page number is always correct.
+      2. Track the most recent markdown header as a running section name.
+      3. Within each page, split on headers for semantic boundaries.
+      4. Sub-split oversized page sections via sliding window.
 
     Args:
         pages: Output of :func:`_extract_markdown_pages`.
@@ -125,74 +184,68 @@ def _markdown_section_chunks(
     Returns:
         List of chunk dicts compatible with ``CHUNK_SCHEMA``.
     """
-    # ── Stage A: merge pages with markers ────────────────────────────────
-    parts: list[str] = []
-    for page_num, text in pages:
-        parts.append(f"<!-- PAGE:{page_num} -->")
-        parts.append(text)
-    full_text = "\n".join(parts)
-
-    # ── Stage B: split on headers ────────────────────────────────────────
-    header_positions = list(_HEADER_RE.finditer(full_text))
-
-    # (heading_text, body, position_in_full_text)
-    sections: list[tuple[str, str, int]] = []
-    if header_positions:
-        # Text before the first header (preamble)
-        preamble = full_text[: header_positions[0].start()].strip()
-        if preamble:
-            sections.append(("", preamble, 0))
-        # Each header + body until the next header
-        for i, match in enumerate(header_positions):
-            heading = match.group(2).strip()
-            start = match.start()
-            next_start = header_positions[i + 1].start() if i + 1 < len(header_positions) else None
-            end = next_start if next_start is not None else len(full_text)
-            body = full_text[start:end].strip()
-            sections.append((heading, body, start))
-    else:
-        # No headers at all — treat entire text as one section
-        sections.append(("", full_text, 0))
-
-    # ── Stage C: build chunk dicts with size enforcement ─────────────────
     chunk_dicts: list[dict[str, object]] = []
+    current_section = ""  # running section name inherited across pages
 
-    for heading, body, pos in sections:
-        # Find the nearest PAGE marker at or before this section's position
-        page = _find_page_at_position(full_text, pos, pages)
-
-        # Remove page markers from final text
-        clean_text = _PAGE_MARKER_RE.sub("", body).strip()
-        if not clean_text:
+    for page_num, page_text in pages:
+        text = page_text.strip()
+        if not text:
             continue
 
-        if len(clean_text) <= max_chunk_size:
-            chunk_dicts.append(_make_chunk(doc_id, clean_text, page, heading))
-        else:
-            # Sub-split oversized sections
-            sub_chunks = _sliding_window_chunks(clean_text, size=max_chunk_size, overlap=overlap)
-            for sub in sub_chunks:
-                chunk_dicts.append(_make_chunk(doc_id, sub, page, heading))
+        # Find headers on this page
+        headers = list(_HEADER_RE.finditer(text))
+
+        if not headers:
+            # No headers on this page — use the running section name
+            _add_page_chunks(
+                chunk_dicts, doc_id, text, page_num, current_section,
+                max_chunk_size, overlap,
+            )
+            continue
+
+        # Split on headers within this page
+        # Text before the first header (inherits running section)
+        preamble = text[: headers[0].start()].strip()
+        if preamble:
+            _add_page_chunks(
+                chunk_dicts, doc_id, preamble, page_num, current_section,
+                max_chunk_size, overlap,
+            )
+
+        for i, match in enumerate(headers):
+            current_section = match.group(2).strip()
+            start = match.start()
+            end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+            section_text = text[start:end].strip()
+            if section_text:
+                _add_page_chunks(
+                    chunk_dicts, doc_id, section_text, page_num, current_section,
+                    max_chunk_size, overlap,
+                )
 
     return chunk_dicts
 
 
-def _find_page_at_position(full_text: str, pos: int, pages: list[tuple[int, str]]) -> int:
-    """Find the page number for a section starting at *pos* in *full_text*.
+def _add_page_chunks(
+    out: list[dict[str, object]],
+    doc_id: str,
+    text: str,
+    page: int,
+    section: str,
+    max_chunk_size: int,
+    overlap: int,
+) -> None:
+    """Append chunk(s) for a block of text from a single page.
 
-    Scans backwards from *pos* to find the nearest ``<!-- PAGE:N -->`` marker.
-    Falls back to the first page in *pages* if no marker is found.
+    If the text fits within *max_chunk_size*, one chunk is created.
+    Otherwise it is sub-split via sliding window.
     """
-    # Find all PAGE markers up to (and including) pos
-    last_page = 0
-    for match in _PAGE_MARKER_RE.finditer(full_text):
-        if match.start() <= pos:
-            last_page = int(match.group(1))
-        else:
-            break
-    if last_page > 0:
-        return last_page
-    return pages[0][0] if pages else 0
+    if len(text) <= max_chunk_size:
+        out.append(_make_chunk(doc_id, text, page, section))
+    else:
+        for sub in _sliding_window_chunks(text, size=max_chunk_size, overlap=overlap):
+            if sub.strip():
+                out.append(_make_chunk(doc_id, sub.strip(), page, section))
 
 
 def _make_chunk(doc_id: str, text: str, page: int, section: str) -> dict[str, object]:
@@ -271,7 +324,7 @@ def _run_ingestion(doc_id: str, file_path: Path, filename: str) -> None:
         # ── Chunk ────────────────────────────────────────────────────────
         logger.info("[%s] Chunking %d page(s)…", doc_id[:8], len(pages))
         upsert_document(doc_id, filename, "processing", 0, f"Chunking {len(pages)} pages…")
-        chunk_dicts = _markdown_section_chunks(pages, doc_id)
+        chunk_dicts = _page_first_chunks(pages, doc_id)
 
         if not chunk_dicts:
             logger.error("[%s] Chunking produced 0 chunks for '%s'", doc_id[:8], filename)

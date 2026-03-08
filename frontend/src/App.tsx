@@ -5,6 +5,7 @@ import { PdfViewer } from "./components/PdfViewer";
 import { ProgressPage } from "./pages/ProgressPage";
 import { TutorPage } from "./pages/TutorPage";
 import { useChat } from "./hooks/useChat";
+import type { SelectionAttachment } from "./hooks/useChat";
 
 type View = "tutor" | "documents" | "progress";
 
@@ -17,6 +18,7 @@ export default function App() {
   const [view, setView] = useState<View>("tutor");
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [targetPage, setTargetPage] = useState<number | undefined>(undefined);
+  const [pendingSelection, setPendingSelection] = useState<SelectionAttachment | null>(null);
 
   const chat = useChat();
 
@@ -31,6 +33,17 @@ export default function App() {
     // Citations are 1-indexed; PDF viewer is 0-indexed
     setTargetPage(page - 1);
     setView("tutor");
+  }, []);
+
+  const handleSelectionCapture = useCallback(
+    (sel: { imageBase64: string; page: number | null }) => {
+      setPendingSelection({ imageBase64: sel.imageBase64, page: sel.page });
+    },
+    [],
+  );
+
+  const handleClearSelection = useCallback(() => {
+    setPendingSelection(null);
   }, []);
 
   return (
@@ -94,7 +107,7 @@ export default function App() {
         <PanelGroup direction="horizontal" style={{ flex: 1 }}>
           {/* Left pane — PDF viewer */}
           <Panel defaultSize={45} minSize={20} style={{ overflow: "hidden" }}>
-            <PdfViewer fileUrl={pdfUrl} targetPage={targetPage} />
+            <PdfViewer fileUrl={pdfUrl} targetPage={targetPage} onSelectionCapture={handleSelectionCapture} />
           </Panel>
 
           <PanelResizeHandle
@@ -103,7 +116,12 @@ export default function App() {
 
           {/* Right pane — Socratic chat */}
           <Panel defaultSize={55} minSize={30} style={{ overflow: "hidden" }}>
-            <TutorPage chat={chat} onCitationClick={handleCitationClick} />
+            <TutorPage
+              chat={chat}
+              onCitationClick={handleCitationClick}
+              pendingSelection={pendingSelection}
+              onClearSelection={handleClearSelection}
+            />
           </Panel>
         </PanelGroup>
       </div>

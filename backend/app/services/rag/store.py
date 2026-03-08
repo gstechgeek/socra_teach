@@ -176,18 +176,36 @@ def fetch_chunks_by_ids(ids: list[str]) -> list[dict[str, Any]]:
     return arrow_tbl.filter(mask).to_pylist()  # type: ignore[return-value]
 
 
-def get_all_chunk_texts() -> list[tuple[str, str]]:
-    """Return (id, text) tuples for every chunk — used to rebuild BM25 index.
+def fetch_chunks_by_page(page: int) -> list[dict[str, Any]]:
+    """Fetch all chunks from a specific page number.
+
+    Args:
+        page: 1-indexed page number.
 
     Returns:
-        List of (chunk_id, text) tuples, empty if no chunks exist.
+        List of matching row dicts.
     """
     db = get_db()
     if _CHUNKS_TABLE not in db.table_names():
         return []
     tbl = get_chunks_table()
-    arrow_tbl = tbl.to_arrow().select(["id", "text"])
-    return [(r["id"], r["text"]) for r in arrow_tbl.to_pylist()]
+    arrow_tbl = tbl.to_arrow()
+    mask = pc.equal(arrow_tbl["page"], page)
+    return arrow_tbl.filter(mask).to_pylist()  # type: ignore[return-value]
+
+
+def get_all_chunk_texts() -> list[tuple[str, str, int]]:
+    """Return (id, text, page) tuples for every chunk — used to rebuild BM25 index.
+
+    Returns:
+        List of (chunk_id, text, page) tuples, empty if no chunks exist.
+    """
+    db = get_db()
+    if _CHUNKS_TABLE not in db.table_names():
+        return []
+    tbl = get_chunks_table()
+    arrow_tbl = tbl.to_arrow().select(["id", "text", "page"])
+    return [(r["id"], r["text"], r["page"]) for r in arrow_tbl.to_pylist()]
 
 
 def get_document(doc_id: str) -> dict[str, Any] | None:

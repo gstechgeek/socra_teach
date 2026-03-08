@@ -2,7 +2,7 @@ import React, { type FormEvent, type ReactNode, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { type Message } from "../hooks/useChat";
+import { type Message, type SelectionAttachment } from "../hooks/useChat";
 
 // Phase 6: replace react-markdown with Streamdown (by Vercel) for
 // native streaming markdown + KaTeX + Shiki code highlighting.
@@ -106,11 +106,22 @@ const MessageBubble = React.memo(function MessageBubble({
 interface ChatProps {
   messages: Message[];
   isStreaming: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachment?: SelectionAttachment) => void;
   onCitationClick?: (page: number) => void;
+  /** Pending selection from the PDF viewer. */
+  pendingSelection?: SelectionAttachment | null;
+  /** Clear the pending selection. */
+  onClearSelection?: () => void;
 }
 
-export function Chat({ messages, isStreaming, onSend, onCitationClick }: ChatProps) {
+export function Chat({
+  messages,
+  isStreaming,
+  onSend,
+  onCitationClick,
+  pendingSelection,
+  onClearSelection,
+}: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -119,7 +130,8 @@ export function Chat({ messages, isStreaming, onSend, onCitationClick }: ChatPro
     const trimmed = input.trim();
     if (!trimmed || isStreaming) return;
     setInput("");
-    onSend(trimmed);
+    onSend(trimmed, pendingSelection ?? undefined);
+    onClearSelection?.();
     setTimeout(
       () => bottomRef.current?.scrollIntoView({ behavior: "smooth" }),
       50,
@@ -156,6 +168,50 @@ export function Chat({ messages, isStreaming, onSend, onCitationClick }: ChatPro
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Selection preview */}
+      {pendingSelection && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.4rem 0.6rem",
+            marginBottom: "0.4rem",
+            background: "#1a1d2e",
+            borderRadius: 6,
+            border: "1px solid #2563eb44",
+          }}
+        >
+          <img
+            src={`data:image/png;base64,${pendingSelection.imageBase64}`}
+            alt="PDF selection"
+            style={{
+              maxWidth: 80,
+              maxHeight: 48,
+              borderRadius: 4,
+              border: "1px solid #333",
+            }}
+          />
+          <span style={{ fontSize: "0.75rem", color: "#93a3c0", flex: 1 }}>
+            Selection{pendingSelection.page ? ` from p.${pendingSelection.page}` : ""}
+          </span>
+          <button
+            type="button"
+            onClick={onClearSelection}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#7c84a0",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+              padding: "0.1rem 0.3rem",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Input bar */}
       <form onSubmit={handleSubmit} style={{ display: "flex", gap: "0.5rem" }}>
