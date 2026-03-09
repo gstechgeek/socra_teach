@@ -54,6 +54,7 @@ class StreamSources:
 async def route_and_stream(
     messages: list[dict[str, str]],
     selection: dict[str, object] | None = None,
+    active_doc_id: str | None = None,
 ) -> AsyncIterator[str | StreamMeta | StreamSources]:
     """Stream Socratic-framed tokens via the cloud dialogue tier.
 
@@ -82,7 +83,7 @@ async def route_and_stream(
     context: str | None = None
     sources: list[SourceRef] = []
     if query:
-        candidates = await retrieve(query, top_k=10)
+        candidates = await retrieve(query, top_k=10, doc_id=active_doc_id)
         if candidates:
             reranked = await rerank(query, candidates, top_k=3)
             if reranked:

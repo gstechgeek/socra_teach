@@ -44,7 +44,7 @@ export interface UseChatReturn {
  * Sends the full message history to /api/chat/stream and appends
  * streamed tokens to the last assistant message in real time.
  */
-export function useChat(sessionId?: string): UseChatReturn {
+export function useChat(sessionId?: string, activeDocId?: string | null): UseChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -98,6 +98,7 @@ export function useChat(sessionId?: string): UseChatReturn {
               content: m.content,
             })),
             session_id: sessionId ?? null,
+            active_doc_id: activeDocId ?? null,
             ...(attachment
               ? {
                   selection_context: {
@@ -167,7 +168,7 @@ export function useChat(sessionId?: string): UseChatReturn {
         setIsStreaming(false);
       }
     },
-    [isStreaming, sessionId],
+    [isStreaming, sessionId, activeDocId],
   );
 
   const reset = useCallback(() => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Viewer, Worker } from "@react-pdf-viewer/core";
+import { SpecialZoomLevel, Viewer, Worker } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
 import { useRectSelect } from "../hooks/useRectSelect";
 
@@ -280,7 +280,7 @@ export function PdfViewer({ fileUrl, targetPage, onSelectionCapture }: PdfViewer
         }}
       >
         <Worker workerUrl={WORKER_URL}>
-          <Viewer fileUrl={fileUrl} plugins={[pluginInstance]} />
+          <Viewer fileUrl={fileUrl} defaultScale={SpecialZoomLevel.PageFit} plugins={[pluginInstance]} />
         </Worker>
       </div>
     </div>

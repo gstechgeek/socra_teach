@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
 from app.services.rag.embedder import embed_texts
-from app.services.rag.store import fetch_chunks_by_ids, fetch_chunks_by_page, vector_search
+from app.services.rag.store import (
+    fetch_chunks_by_ids,
+    fetch_chunks_by_page,
+    vector_search,
+)
 
 # Regex to extract page references from user queries.
 # Matches: "page 112", "p. 112", "p.112", "p 112", "pg 112", "pg. 112"
@@ -23,10 +27,11 @@ logger = logging.getLogger(__name__)
 _bm25: BM25Okapi | None = None
 _bm25_ids: list[str] = []
 _bm25_pages: list[int] = []  # page number for each chunk (parallel to _bm25_ids)
+_bm25_doc_ids: list[str] = []  # doc_id for each chunk (parallel to _bm25_ids)
 
 
-def rebuild_bm25_index(chunks: list[tuple[str, str, int]]) -> None:
-    """Rebuild the in-memory BM25 index from a list of (id, text, page) tuples.
+def rebuild_bm25_index(chunks: list[tuple[str, str, int, str]]) -> None:
+    """Rebuild the in-memory BM25 index from a list of (id, text, page, doc_id) tuples.
 
     Called on server startup (to restore index from existing LanceDB data)
     and after each successful document ingestion.
@@ -35,21 +40,23 @@ def rebuild_bm25_index(chunks: list[tuple[str, str, int]]) -> None:
     queries that reference specific page numbers.
 
     Args:
-        chunks: List of (chunk_id, text, page) tuples for all stored chunks.
+        chunks: List of (chunk_id, text, page, doc_id) tuples for all stored chunks.
     """
-    global _bm25, _bm25_ids, _bm25_pages
+    global _bm25, _bm25_ids, _bm25_pages, _bm25_doc_ids
     if not chunks:
         _bm25 = None
         _bm25_ids = []
         _bm25_pages = []
+        _bm25_doc_ids = []
         logger.info("BM25 index cleared (no chunks)")
         return
-    _bm25_ids = [cid for cid, _, _ in chunks]
-    _bm25_pages = [page for _, _, page in chunks]
+    _bm25_ids = [cid for cid, _, _, _ in chunks]
+    _bm25_pages = [page for _, _, page, _ in chunks]
+    _bm25_doc_ids = [doc_id for _, _, _, doc_id in chunks]
     # Prepend "page N" so BM25 matches queries like "page 112"
     tokenized = [
         ["page", str(page)] + text.lower().split()
-        for _, text, page in chunks
+        for _, text, page, _ in chunks
     ]
     _bm25 = BM25Okapi(tokenized)
     logger.info("BM25 index rebuilt with %d chunk(s)", len(chunks))
@@ -91,6 +98,7 @@ async def retrieve(
     top_k: int = 5,
     bm25_weight: float = 0.6,
     vector_weight: float = 0.4,
+    doc_id: str | None = None,
 ) -> list[RetrievedChunk]:
     """Hybrid BM25 + vector retrieval with score fusion.
 
@@ -102,11 +110,15 @@ async def retrieve(
     notation and theorem references are best matched by exact keyword
     search, not semantic similarity.
 
+    When ``doc_id`` is provided, results are filtered to only include chunks
+    from that document. This scopes retrieval to the currently open textbook.
+
     Args:
         query: Natural-language or math-notation query string.
         top_k: Number of candidates to return before re-ranking.
         bm25_weight: Score weight for the BM25 (keyword) component.
         vector_weight: Score weight for the vector (semantic) component.
+        doc_id: Optional document ID to scope retrieval to a single textbook.
 
     Returns:
         Top-k chunks sorted by fused score, descending.
@@ -138,17 +150,39 @@ async def retrieve(
     # LanceDB returns _distance (cosine distance, lower = better) → similarity
     vec_norm: dict[str, float] = {row["id"]: max(0.0, 1.0 - row["_distance"]) for row in vec_rows}
 
+    # ── Document-scoped filtering ──────────────────────────────────────────────
+    # Build lookup maps from BM25 index parallel arrays.
+    id_to_page: dict[str, int] = dict(zip(_bm25_ids, _bm25_pages, strict=False))
+    id_to_doc: dict[str, str] = dict(zip(_bm25_ids, _bm25_doc_ids, strict=False))
+    # Also populate from vector search results (may include chunks not in BM25 index)
+    for row in vec_rows:
+        id_to_doc[row["id"]] = row["doc_id"]
+
+    # When a doc_id filter is active, remove scores for other documents.
+    if doc_id:
+        logger.info("Scoping retrieval to doc_id=%s", doc_id[:8])
+        bm25_norm = {
+            cid: score for cid, score in bm25_norm.items()
+            if id_to_doc.get(cid) == doc_id
+        }
+        vec_norm = {
+            cid: score for cid, score in vec_norm.items()
+            if id_to_doc.get(cid) == doc_id
+        }
+
     # ── Page-aware chunk injection ─────────────────────────────────────────────
     # If the query mentions specific pages, fetch all chunks from those pages
     # and inject them into the candidate set so they participate in fusion.
-    # Build id → page lookup from BM25 index for boosting.
-    id_to_page: dict[str, int] = dict(zip(_bm25_ids, _bm25_pages, strict=False))
     if mentioned_pages:
         for page_num in mentioned_pages:
             page_rows = await asyncio.to_thread(fetch_chunks_by_page, page_num)
             for row in page_rows:
+                # Skip chunks from other documents when scoped
+                if doc_id and row.get("doc_id") != doc_id:
+                    continue
                 cid = row["id"]
                 id_to_page[cid] = row["page"]
+                id_to_doc[cid] = row.get("doc_id", "")
                 if cid not in vec_norm:
                     vec_norm[cid] = 0.0
                 if cid not in bm25_norm:

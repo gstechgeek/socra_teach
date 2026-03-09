@@ -1,4 +1,4 @@
-# Handover — socra_teach (2026-03-05)
+# Handover — socra_teach (2026-03-09)
 
 ## What's Done
 
@@ -9,32 +9,35 @@
 | 1 — Foundation (llama.cpp + FastAPI streaming) | Done |
 | 2 — Socratic engine + cloud routing | Done |
 | 3 — RAG pipeline (BM25 + vector + cross-encoder) | Done |
-| 4 — PDF viewer + citations | Done (needs manual verification) |
+| 4 — PDF viewer + citations | Done |
 | 5 — FSRS spaced repetition + BKT progress tracking | Done |
 | 6 — Polish, optimization, advanced features | In progress |
 
 ### Recent Changes (this session)
 
-1. **Cloud embedding via OpenRouter** — added `_embed_cloud_batch()` and `_embed_cloud()` to `embedder.py`; dispatches to `openai/text-embedding-3-small` (or `text-embedding-3-large`) via OpenRouter's `/embeddings` endpoint based on `settings.embedding_provider`.
-2. **Automatic batching** — cloud embedding splits large inputs into batches of 128 to stay within API limits; fixed `KeyError: 'data'` crash when sending all 824 chunks in a single request.
-3. **Config additions** — added `embedding_provider` and `cloud_embedding_model` to `config.py`; default set to `"openrouter"`.
-4. **Structured logging across all RAG modules** — added `logger = logging.getLogger(__name__)` and INFO-level logging to `embedder.py`, `ingestion.py`, `store.py`, `retriever.py`, `reranker.py`; added `logging.basicConfig()` to `main.py`.
-5. **Fixed silent exception swallowing** — changed `ingestion.py` exception handler from `str(exc)` only to `logger.exception()` for full tracebacks.
-6. **Fixed ruff B905** — added `strict=True` to `zip(scores, chunks)` in `reranker.py`.
-7. **Unit tests** — created `tests/unit/test_embedder.py` with 8 tests covering dispatch, cloud batching, error handling, and payload verification.
-8. **Wiped stale LanceDB vectors** — deleted `chunks.lance` and `documents.lance` tables that had incompatible nomic-embed vectors; user re-ingested with OpenAI embeddings.
-9. **Updated `.env.example`** — documented `EMBEDDING_PROVIDER` and `CLOUD_EMBEDDING_MODEL`.
+1. **PDF rectangle selection** — implemented full-stack feature: `useRectSelect.ts` hook for mouse-drag, canvas pixel capture in `PdfViewer.tsx`, selection preview chip in `Chat.tsx`, multimodal OpenAI vision format in `router.py` via `_inject_selection_image()`.
+2. **RAG page-first chunking** — replaced broken header-first chunking (only 2 page values across 824 chunks) with `_page_first_chunks()` in `ingestion.py` that processes each page independently, trivially preserving page numbers.
+3. **Printed page labels** — added `_build_page_label_map()` and `_resolve_page_number()` using PyMuPDF's `page.get_label()` to map PDF page indices to printed page numbers (fixes ~8-page front matter offset).
+4. **Page-aware retrieval** — `retriever.py` now parses page references from queries (`_PAGE_REF_RE`), injects chunks from mentioned pages, and applies +0.3 page boost in fusion scoring; BM25 tokens include `["page", str(page)]`.
+5. **Document-scoped retrieval** — `retrieve()` accepts `doc_id` parameter; filters BM25 and vector results to the active textbook; frontend passes `activeDocId` through `useChat` → `ChatRequest` → `route_and_stream()` → `retrieve()`.
+6. **Page-fit default zoom** — `PdfViewer.tsx` now uses `SpecialZoomLevel.PageFit` as `defaultScale`.
+7. **README** — populated `README.md` with features, architecture diagram, setup instructions, usage guide, and development commands.
+8. **Test fixes** — updated `test_ingestion.py` to use `_page_first_chunks` (removed references to deleted `_markdown_section_chunks` and `_find_page_at_position`); added test for section name inheritance across pages.
+9. **Card generator JSON fix** — added brace-depth extraction fallback in `card_generator.py` for LLM responses with extra text after the JSON object.
+10. **BM25 index expanded** — `get_all_chunk_texts()` now returns `(id, text, page, doc_id)` 4-tuples; `rebuild_bm25_index()` tracks `_bm25_doc_ids` parallel array for document filtering.
 
 ### Test & Build Status
 
-- **Backend**: 8 embedder tests passing; 102 total tests passing (coverage failure is pre-existing — 9.27% vs 80% target due to untested modules)
+- **Backend**: 110 tests passing; coverage 81.45% (above 80% target)
 - **Lint**: Clean (`ruff check` passes on all changed files)
+- **Frontend**: TypeScript compiles clean (`tsc --noEmit` passes)
 
 ### Committed Work
 
 On branch `ZeroRAG`:
 ```
-c9e4037 feat: enhance embedding provider with local and cloud options, add logging, and implement unit tests
+f7e81ed docs: update README with comprehensive application overview and features
+411436d feat: implement PDF selection capture and multimodal chat integration
 ```
 
 ---
@@ -46,25 +49,8 @@ c9e4037 feat: enhance embedding provider with local and cloud options, add loggi
 1. **Blank page on Textbooks and Progress tabs** — not yet root-caused; likely React runtime error.
 2. **`type: ignore` suppressions in `progress.py:214-223`** — violates CLAUDE.md strict mypy rule.
 3. **LanceDB `table_names()` deprecation** — 114 test warnings; needs `list_tables()`.
-4. **Backend coverage at 9.27%** — far below 80% target; `health.py`, `main.py`, `scheduler.py`, `bkt.py`, `classifier.py`, `socratic.py` have 0% coverage.
-5. **"Connection lost" on first chat query** — streaming rINFO:     127.0.0.1:56454 - "POST /api/chat/stream HTTP/1.1" 200 OK
-14:14:10  INFO      app.services.rag.retriever  Retrieving top-10 for query: what are the contents of this book?…
-14:14:10  INFO      app.services.rag.embedder  Embedding 1 text(s) via openrouter/openai/text-embedding-3-small
-14:14:11  INFO      httpx  HTTP Request: POST https://openrouter.ai/api/v1/embeddings "HTTP/1.1 200 OK"
-14:14:12  INFO      app.services.rag.retriever  Retrieved 10 chunk(s), top score=0.6000
-14:14:12  INFO      app.services.rag.reranker  Re-ranking 10 chunk(s) for query: what are the contents of this book?…
-14:14:19  INFO      sentence_transformers.cross_encoder.CrossEncoder  Use pytorch device: cpu
-Batches: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:01<00:00,  1.12s/it]
-14:14:22  INFO      app.services.rag.reranker  Re-ranking complete — returning top 3
-INFO:     127.0.0.1:60176 - "POST /api/chat/stream HTTP/1.1" 200 OK
-14:39:02  INFO      app.services.rag.retriever  Retrieving top-10 for query: What are the contents of the book?…
-14:39:02  INFO      app.services.rag.embedder  Embedding 1 text(s) via openrouter/openai/text-embedding-3-small
-14:39:04  INFO      httpx  HTTP Request: POST https://openrouter.ai/api/v1/embeddings "HTTP/1.1 200 OK"
-14:39:05  INFO      app.services.rag.retriever  Retrieved 10 chunk(s), top score=0.6000
-14:39:05  INFO      app.services.rag.reranker  Re-ranking 10 chunk(s) for query: What are the contents of the book?…
-Batches: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:01<00:00,  1.16s/it]
-14:39:06  INFO      app.services.rag.reranker  Re-ranking complete — returning top 3
-14:39:10  INFO      httpx  HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"esponse cut off mid-sentence ("Looking at problem 5.26(a) on (p"); may be a timeout or response length issue with claude-sonnet-4-5.
+4. **"Connection lost" on first chat query** — response cut off mid-sentence; may be timeout or response length issue with claude-sonnet-4-5.
+5. **PDF selection "Use as context" button** — `onMouseDown` stopPropagation fix applied but not manually verified by user (conversation moved to RAG work before confirmation).
 
 ### Should Fix
 
@@ -72,6 +58,7 @@ Batches: 100%|██████████████████████
 7. **No frontend tests** — Vitest configured but zero test files.
 8. **Local LLM dead code** — `llm.py`, `_stream_local_async()` unused at runtime.
 9. **Cross-encoder loads on CPU** — ~10s re-ranking latency for 10 chunks; consider cloud re-ranking or disabling for simple queries.
+10. **Re-ingest required** — existing LanceDB chunks use old chunking strategy (broken page numbers); re-upload textbooks to get page-first chunks with printed page labels.
 
 ---
 
@@ -83,7 +70,8 @@ Batches: 100%|██████████████████████
 - Memory budget verification (full-stack ≤ 7 GB)
 - UI polish, accessibility, React error boundary
 - Fix streaming connection loss issue
-- Backend test coverage improvement
+- Frontend test coverage
+- Verify PDF selection feature end-to-end
 
 ---
 
@@ -92,10 +80,12 @@ Batches: 100%|██████████████████████
 | Decision | Context |
 |----------|---------|
 | Cloud-only tutor | Local 1B model too slow on shared VRAM; all queries go to claude-sonnet-4-5 |
-| Cloud embedding via OpenRouter | Local nomic-embed too slow on CPU (~70-80% of ingestion time); OpenAI text-embedding-3-small via OpenRouter cuts embedding to ~6s for 824 chunks |
-| Sync httpx for cloud embedding | Both call sites (ingestion thread, retriever thread) are sync; async httpx would require restructuring |
-| Deferred sentence-transformers import | Saves ~500 MB RAM when using cloud embedding provider |
-| Batch size 128 for cloud embedding | OpenRouter/OpenAI has payload limits; 824 chunks → 7 batches |
+| Cloud embedding via OpenRouter | Local nomic-embed too slow on CPU; OpenAI text-embedding-3-small via OpenRouter |
+| Page-first chunking | Header-first chunking collapsed 497 pages into 2 sections; page-first processes each page independently |
+| Printed page labels | PyMuPDF `page.get_label()` maps PDF page indices to printed page numbers (front matter offset) |
+| Document-scoped retrieval | `active_doc_id` flows frontend → backend; retriever filters BM25/vector/page results by doc_id |
+| Page-aware retrieval | BM25 tokens include page number; mentioned pages get +0.3 boost and direct chunk injection |
+| Multimodal selection via OpenAI vision format | PDF rectangle captures sent as base64 PNG in `image_url` content parts to cloud LLM |
 | LanceDB only (no Supabase yet) | Local-first; Supabase sync deferred |
 | Background card gen via haiku | `asyncio.create_task()` after each chat turn; uses fast/cheap cloud tier |
 | Citations are 1-indexed | Backend emits page numbers as-is from chunks; frontend converts to 0-indexed for `jumpToPage` |
@@ -105,10 +95,25 @@ Batches: 100%|██████████████████████
 ## Files Changed (uncommitted)
 
 ```
-(none — working tree clean)
+M backend/app/api/routes/chat.py          — added active_doc_id to ChatRequest
+M backend/app/services/rag/retriever.py   — doc_id filtering, _bm25_doc_ids, 4-tuple rebuild
+M backend/app/services/rag/store.py       — get_all_chunk_texts returns (id, text, page, doc_id)
+M backend/app/services/tutor/router.py    — passes active_doc_id to retrieve()
+M backend/tests/unit/test_ingestion.py    — updated to use _page_first_chunks, added inheritance test
+M frontend/src/App.tsx                    — passes activeDocId to useChat
+M frontend/src/components/PdfViewer.tsx   — SpecialZoomLevel.PageFit default
+M frontend/src/hooks/useChat.ts           — accepts activeDocId, sends active_doc_id in request
 ```
 
 ---
+
+## Previous Session (2026-03-05)
+
+1. Cloud embedding via OpenRouter — `_embed_cloud_batch()` in `embedder.py` for `openai/text-embedding-3-small`.
+2. Automatic batching — cloud embedding splits large inputs into batches of 128.
+3. Structured logging across all RAG modules.
+4. Unit tests — `test_embedder.py` with 8 tests.
+5. Wiped stale LanceDB vectors for re-ingestion with OpenAI embeddings.
 
 ## Previous Session (2026-03-04)
 

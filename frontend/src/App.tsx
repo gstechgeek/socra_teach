@@ -20,7 +20,7 @@ export default function App() {
   const [targetPage, setTargetPage] = useState<number | undefined>(undefined);
   const [pendingSelection, setPendingSelection] = useState<SelectionAttachment | null>(null);
 
-  const chat = useChat();
+  const chat = useChat(undefined, activeDocId);
 
   const pdfUrl = activeDocId ? `/api/documents/${activeDocId}/file` : null;
 

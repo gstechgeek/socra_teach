@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
 
     messages: list[dict[str, str]]
     session_id: str | None = None
+    active_doc_id: str | None = None
     selection_context: SelectionContext | None = None
 
 
@@ -65,7 +66,9 @@ async def chat_stream(request: ChatRequest) -> EventSourceResponse:
                     "image_base64": request.selection_context.image_base64,
                     "page": request.selection_context.page,
                 }
-            async for item in route_and_stream(request.messages, selection=selection):
+            async for item in route_and_stream(
+                request.messages, selection=selection, active_doc_id=request.active_doc_id
+            ):
                 if isinstance(item, StreamMeta):
                     yield {
                         "event": "metadata",
