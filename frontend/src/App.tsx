@@ -19,6 +19,7 @@ export default function App() {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [targetPage, setTargetPage] = useState<number | undefined>(undefined);
   const [pendingSelection, setPendingSelection] = useState<SelectionAttachment | null>(null);
+  const [pageLabelMap, setPageLabelMap] = useState<Map<number, number>>(new Map());
 
   const chat = useChat(undefined, activeDocId);
 
@@ -30,10 +31,12 @@ export default function App() {
   }, []);
 
   const handleCitationClick = useCallback((page: number) => {
-    // Citations are 1-indexed; PDF viewer is 0-indexed
-    setTargetPage(page - 1);
+    // Use the PDF's page label map for correct navigation (handles front matter offsets).
+    // Falls back to page - 1 when no label map is available.
+    const pdfPage = pageLabelMap.get(page) ?? (page - 1);
+    setTargetPage(pdfPage);
     setView("tutor");
-  }, []);
+  }, [pageLabelMap]);
 
   const handleSelectionCapture = useCallback(
     (sel: { imageBase64: string; page: number | null }) => {
@@ -107,7 +110,7 @@ export default function App() {
         <PanelGroup direction="horizontal" style={{ flex: 1 }}>
           {/* Left pane — PDF viewer */}
           <Panel defaultSize={45} minSize={20} style={{ overflow: "hidden" }}>
-            <PdfViewer fileUrl={pdfUrl} targetPage={targetPage} onSelectionCapture={handleSelectionCapture} />
+            <PdfViewer fileUrl={pdfUrl} targetPage={targetPage} onSelectionCapture={handleSelectionCapture} onPageLabelMap={setPageLabelMap} />
           </Panel>
 
           <PanelResizeHandle

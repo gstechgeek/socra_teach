@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { SpecialZoomLevel, Viewer, Worker } from "@react-pdf-viewer/core";
+import type { DocumentLoadEvent } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
 import { useRectSelect } from "../hooks/useRectSelect";
 
@@ -24,6 +25,8 @@ interface PdfViewerProps {
   fileUrl: string | null;
   targetPage?: number; // 0-indexed page to jump to
   onSelectionCapture?: (selection: PdfSelection) => void;
+  /** Called once after the PDF loads with a map from printed page number → 0-indexed PDF page. */
+  onPageLabelMap?: (map: Map<number, number>) => void;
 }
 
 /**
@@ -38,19 +41,41 @@ interface PdfViewerProps {
  * In selection mode, the user can draw a rectangle over any area (text or
  * diagram) which is captured as a PNG and forwarded to the chat.
  */
-export function PdfViewer({ fileUrl, targetPage, onSelectionCapture }: PdfViewerProps) {
-  // Called at top level — defaultLayoutPlugin() uses hooks internally
+export function PdfViewer({ fileUrl, targetPage, onSelectionCapture, onPageLabelMap }: PdfViewerProps) {
+  // defaultLayoutPlugin() uses React hooks internally — call at top level, never inside useMemo.
   const pluginInstance = defaultLayoutPlugin();
+  const pluginRef = useRef(pluginInstance);
+  pluginRef.current = pluginInstance;
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const { isSelecting, toggleSelecting, rect, clearRect, onMouseDown, onMouseMove, onMouseUp } =
     useRectSelect();
 
-  // Jump to page when targetPage changes
+  // Jump to page when targetPage changes (use ref to avoid re-running on every render)
   useEffect(() => {
-    if (targetPage === undefined || targetPage < 0 || !pluginInstance) return;
-    const nav = pluginInstance.toolbarPluginInstance.pageNavigationPluginInstance;
+    if (targetPage === undefined || targetPage < 0) return;
+    const nav = pluginRef.current.toolbarPluginInstance.pageNavigationPluginInstance;
     nav.jumpToPage(targetPage);
-  }, [targetPage, pluginInstance]);
+  }, [targetPage]);
+
+  // Extract page labels from the PDF so citation clicks map to the correct page
+  const handleDocumentLoad = useCallback(
+    (e: DocumentLoadEvent) => {
+      if (!onPageLabelMap) return;
+      e.doc.getPageLabels().then((labels: string[] | null) => {
+        const map = new Map<number, number>();
+        if (labels) {
+          labels.forEach((label, idx) => {
+            const num = parseInt(label, 10);
+            if (!isNaN(num) && num > 0) {
+              map.set(num, idx);
+            }
+          });
+        }
+        onPageLabelMap(map);
+      });
+    },
+    [onPageLabelMap],
+  );
 
   /**
    * Capture the pixels within the current rectangle selection.
@@ -280,7 +305,7 @@ export function PdfViewer({ fileUrl, targetPage, onSelectionCapture }: PdfViewer
         }}
       >
         <Worker workerUrl={WORKER_URL}>
-          <Viewer fileUrl={fileUrl} defaultScale={SpecialZoomLevel.PageFit} plugins={[pluginInstance]} />
+          <Viewer fileUrl={fileUrl} defaultScale={SpecialZoomLevel.PageFit} plugins={[pluginInstance]} onDocumentLoad={handleDocumentLoad} />
         </Worker>
       </div>
     </div>

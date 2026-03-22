@@ -1,4 +1,4 @@
-import React, { type FormEvent, type ReactNode, useRef, useState } from "react";
+import React, { type FormEvent, type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -66,12 +66,12 @@ const MessageBubble = React.memo(function MessageBubble({
     <div
       style={{
         marginBottom: "1rem",
-        textAlign: message.role === "user" ? "right" : "left",
+        display: "flex",
+        justifyContent: "flex-start",
       }}
     >
       <div
         style={{
-          display: "inline-block",
           maxWidth: "80%",
           padding: "0.6rem 0.9rem",
           borderRadius: 8,
@@ -79,6 +79,7 @@ const MessageBubble = React.memo(function MessageBubble({
           color: "#e8eaf0",
           fontSize: "0.9rem",
           lineHeight: 1.6,
+          textAlign: "left",
         }}
       >
         <ReactMarkdown
@@ -124,8 +125,26 @@ export function Chat({
 }: ChatProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = (e: FormEvent) => {
+  // Auto-resize textarea to fit content
+  React.useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+    ta.style.overflow = ta.scrollHeight > 96 ? "auto" : "hidden";
+  }, [input]);
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter submits, Shift+Enter inserts a newline
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  const handleSubmit = (e: FormEvent | KeyboardEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || isStreaming) return;
@@ -214,13 +233,15 @@ export function Chat({
       )}
 
       {/* Input bar */}
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: "0.5rem" }}>
-        <input
-          type="text"
+      <form onSubmit={handleSubmit} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Type your answer or question…"
           disabled={isStreaming}
+          rows={1}
           style={{
             flex: 1,
             padding: "0.6rem 0.8rem",
@@ -229,6 +250,11 @@ export function Chat({
             background: "#1a1d27",
             color: "#e8eaf0",
             fontSize: "0.9rem",
+            resize: "none",
+            overflow: "hidden",
+            lineHeight: 1.5,
+            maxHeight: "6rem",
+            fontFamily: "inherit",
           }}
         />
         <button
